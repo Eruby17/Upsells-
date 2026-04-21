@@ -41,20 +41,18 @@ if df_1 is not None:
         tc_actual = float(str(t_val).replace(',', '.'))
     except: pass
 
-# --- MOTOR DE BÚSQUEDA INTELIGENTE DE TARIFAS ---
+# --- MOTOR DE TARIFAS (CON CONVERSIÓN FORZADA) ---
 df_tarifas = pd.DataFrame()
 if df_2 is not None:
     try:
         df_2.columns = [str(c).strip() for c in df_2.columns]
-        # Intentamos convertir la columna 'Date' a objetos fecha reales de Python
-        # Probamos día primero (21/04) y luego mes primero (04/21) para cubrir cualquier formato de Excel
-        df_2['Fecha_Python'] = pd.to_datetime(df_2['Date'], dayfirst=True, errors='coerce')
-        df_2.loc[df_2['Fecha_Python'].isna(), 'Fecha_Python'] = pd.to_datetime(df_2['Date'], dayfirst=False, errors='coerce')
-        
+        # Forzamos que la columna 'Date' se convierta a fecha real de Python, entendiendo que el día va primero (21/04)
+        df_2['Fecha_Real'] = pd.to_datetime(df_2['Date'], dayfirst=True, errors='coerce').dt.date
         # Limpiamos el Rate
         df_2['Rate_Num'] = pd.to_numeric(df_2['Rate'].astype(str).str.replace(',', '.'), errors='coerce')
-        df_tarifas = df_2.dropna(subset=['Fecha_Python', 'Rate_Num']).copy()
-    except: pass
+        df_tarifas = df_2.dropna(subset=['Fecha_Real', 'Rate_Num']).copy()
+    except Exception as e:
+        st.error(f"Error procesando fechas: {e}")
 
 # --- 5. INTERFAZ ---
 st.title("🏨 Professional Upsell Agreement")
@@ -84,7 +82,7 @@ col_cat1, col_cat2 = st.columns(2)
 with col_cat1: cat_orig = st.selectbox("Original Category", list(diferenciales.keys()))
 with col_cat2: cat_dest = st.selectbox("Upgrade Category", list(diferenciales.keys()), index=3)
 
-# Bloque 3: Fechas Separadas y Habitación
+# Bloque 3: Fechas Separadas
 col_in, col_out, col_hab = st.columns(3)
 with col_in: check_in = st.date_input("Check-in Date", datetime.now().date())
 with col_out: check_out = st.date_input("Check-out Date", datetime.now().date() + timedelta(days=1))
@@ -96,16 +94,16 @@ noches = (check_out - check_in).days
 if noches > 0:
     tarifa_base = 0
     if not df_tarifas.empty:
-        # Buscamos comparando objetos fecha (no texto), que es 100% preciso
-        match = df_tarifas[df_tarifas['Fecha_Python'].dt.date == check_in]
+        # Aquí comparamos fecha real contra fecha real (ambas son objetos date de Python)
+        match = df_tarifas[df_tarifas['Fecha_Real'] == check_in]
         if not match.empty:
             tarifa_base = float(match.iloc[0]['Rate_Num'])
     
     if tarifa_base <= 0:
         st.error(f"❌ No rate found for {check_in.strftime('%d/%m/%Y')} in Excel.")
-        with st.expander("Ver Datos Cargados (Depuración)"):
-            st.write("Python está buscando:", check_in)
-            st.write(df_tarifas[['Date', 'Fecha_Python', 'Rate_Num']].head(20))
+        with st.expander("Depuración: Datos en Memoria"):
+            st.write("Python busca:", check_in, type(check_in))
+            st.write(df_tarifas[['Date', 'Fecha_Real', 'Rate_Num']].head(20))
     else:
         gap = (tarifa_base + diferenciales[cat_dest]) - (tarifa_base + diferenciales[cat_orig])
         if gap > 0:
