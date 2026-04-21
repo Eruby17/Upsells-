@@ -5,14 +5,13 @@ import pandas as pd
 import requests
 from io import BytesIO
 
-# --- 1. CONFIGURACIÓN ---
-st.set_page_config(page_title="Upsell Pro - Casa Dorada", page_icon="🏨", layout="wide")
+# --- 1. CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="Cotizador de upsells - Casa Dorada", page_icon="🏨", layout="wide")
 
 # --- 2. IDENTIFICADORES ---
 SHEET_ID = "19hFs0Jgt58uWC_UXJ8_4aVCJVtX7fTBcHO7-iAVo1K0"
 GID_CONFIG = "481323566"  
 GID_TARIFAS = "0"          
-# URL Directa del logo
 LOGO_URL = "https://cdn2.paraty.es/casa-dorada/images/89eeeacd45ffd2e"
 
 def get_csv_url(gid):
@@ -53,14 +52,13 @@ if df_2 is not None:
     except: pass
 
 # --- 5. INTERFAZ ---
-st.title("🏨 Professional Upsell Agreement")
+st.title("🏨 Cotizador de upsells")
 
 with st.sidebar:
-    # Mostrar logo en sidebar para confirmar carga
     st.image(LOGO_URL, width=150)
-    st.metric("Web Discount", f"{desc_actual}%")
-    st.metric("FX Rate", f"${tc_actual} MXN")
-    if st.button("🔄 Sync with Drive"):
+    st.metric("Descuento Aplicado", f"{desc_actual}%")
+    st.metric("T.C. del día", f"${tc_actual} MXN")
+    if st.button("🔄 Sincronizar"):
         st.cache_data.clear()
         st.rerun()
 
@@ -73,18 +71,18 @@ diferenciales = {
 
 # Bloque 1: Huésped
 col_nom, col_fol = st.columns(2)
-with col_nom: cliente = st.text_input("Guest Full Name")
-with col_fol: n_reserva = st.text_input("Confirmation / Folio #")
+with col_nom: cliente = st.text_input("Nombre del Huésped")
+with col_fol: n_reserva = st.text_input("Número de Confirmación / Folio")
 
 # Bloque 2: Categorías
 col_cat1, col_cat2 = st.columns(2)
-with col_cat1: cat_orig = st.selectbox("Original Category", list(diferenciales.keys()))
-with col_cat2: cat_dest = st.selectbox("Upgrade Category", list(diferenciales.keys()), index=3)
+with col_cat1: cat_orig = st.selectbox("Categoría Original", list(diferenciales.keys()))
+with col_cat2: cat_dest = st.selectbox("Upgrade a Categoría", list(diferenciales.keys()), index=3)
 
-# Bloque 3: Fechas Separadas
+# Bloque 3: Fechas
 col_in, col_out = st.columns(2)
-with col_in: check_in = st.date_input("Check-in Date", datetime.now().date())
-with col_out: check_out = st.date_input("Check-out Date", datetime.now().date() + timedelta(days=1))
+with col_in: check_in = st.date_input("Fecha de Entrada (Check-in)", datetime.now().date())
+with col_out: check_out = st.date_input("Fecha de Salida (Check-out)", datetime.now().date() + timedelta(days=1))
 
 # --- 6. CÁLCULOS ---
 noches = (check_out - check_in).days
@@ -97,7 +95,7 @@ if noches > 0:
             tarifa_base = float(match.iloc[0]['Rate_Num'])
     
     if tarifa_base <= 0:
-        st.error(f"❌ No rate found for {check_in.strftime('%d/%m/%Y')} in Excel.")
+        st.error(f"❌ No se encontró tarifa para {check_in.strftime('%d/%m/%Y')} en el archivo.")
     else:
         gap = (tarifa_base + diferenciales[cat_dest]) - (tarifa_base + diferenciales[cat_orig])
         if gap > 0:
@@ -106,23 +104,23 @@ if noches > 0:
             total_mxn = total_usd * tc_actual
 
             st.divider()
-            st.success(f"Calculation complete for {noches} night(s).")
+            st.success(f"Estancia de {noches} noche(s) calculada.")
             res1, res2, res3 = st.columns(3)
-            res1.metric("USD / Night", f"${final_night_usd:,.2f}")
+            res1.metric("USD / Noche (Imp. Incl.)", f"${final_night_usd:,.2f}")
             res2.metric("Total USD", f"${total_usd:,.2f}")
             res3.metric("Total MXN", f"${total_mxn:,.2f}")
 
             # --- 7. GENERACIÓN DE PDF ---
-            if st.button("📝 Generate Official PDF Agreement"):
+            if st.button("📝 Generar Acuerdo PDF"):
                 pdf = FPDF()
                 pdf.add_page()
                 
-                # Intentar cargar logo con mayor robustez
+                # Carga de logo
                 try:
                     response = requests.get(LOGO_URL, timeout=10)
                     img = BytesIO(response.content)
                     pdf.image(img, 10, 8, 50)
-                except Exception as e:
+                except:
                     pdf.set_font("Arial", 'B', 12)
                     pdf.cell(0, 10, "CASA DORADA LOS CABOS", ln=True)
 
@@ -131,9 +129,9 @@ if noches > 0:
                 pdf.cell(0, 10, "ROOM UPGRADE AGREEMENT", ln=True, align='C')
                 pdf.ln(5)
                 
-                # Información del Huésped
+                # Datos Reservación
                 pdf.set_font("Arial", 'B', 10); pdf.set_fill_color(240, 240, 240)
-                pdf.cell(190, 8, " GUEST & RESERVATION DETAILS", ln=True, fill=True)
+                pdf.cell(190, 8, " DETALLES DEL HUESPED Y RESERVACION", ln=True, fill=True)
                 pdf.set_font("Arial", size=10)
                 pdf.cell(95, 8, f" Guest Name: {cliente.upper()}", border='B')
                 pdf.cell(95, 8, f" Confirmation #: {n_reserva}", border='B', ln=True)
@@ -143,15 +141,15 @@ if noches > 0:
                 pdf.ln(8)
 
                 # Categorías
-                pdf.set_font("Arial", 'B', 10); pdf.cell(190, 8, " UPGRADE DETAILS", ln=True, fill=True)
+                pdf.set_font("Arial", 'B', 10); pdf.cell(190, 8, " DETALLES DEL UPGRADE", ln=True, fill=True)
                 pdf.set_font("Arial", size=11)
                 pdf.cell(190, 10, f" Original Category: {cat_orig}", ln=True)
                 pdf.cell(190, 10, f" Upgrade Category: {cat_dest}", ln=True)
                 pdf.ln(5)
 
-                # Costos
-                pdf.set_font("Arial", 'B', 12)
-                pdf.cell(190, 10, " PAYMENT SUMMARY", ln=True)
+                # Desglose Financiero
+                pdf.set_font("Arial", 'B', 11)
+                pdf.cell(190, 10, " RESUMEN DE PAGO", ln=True)
                 pdf.set_font("Arial", size=11)
                 pdf.cell(95, 10, f" Upgrade per Night (Inc. Tax):", border='TL')
                 pdf.cell(95, 10, f" USD ${final_night_usd:,.2f}", border='TR', ln=True, align='R')
@@ -160,14 +158,14 @@ if noches > 0:
                 pdf.cell(95, 12, f" TOTAL AMOUNT DUE:", border='LB')
                 pdf.cell(95, 12, f" USD ${total_usd:,.2f} / MXN ${total_mxn:,.2f}*", border='RB', ln=True, align='R')
                 pdf.set_font("Arial", 'I', 8)
-                pdf.cell(190, 5, f"*Exchange rate used: 1 USD = {tc_actual} MXN", ln=True, align='R')
+                pdf.cell(190, 5, f"*Tipo de cambio aplicado: 1 USD = {tc_actual} MXN", ln=True, align='R')
                 
-                # Política No Reembolsable
+                # Políticas
                 pdf.ln(10)
                 pdf.set_font("Arial", 'B', 10); pdf.set_text_color(200, 0, 0)
-                pdf.cell(190, 8, " IMPORTANT POLICIES:", ln=True)
+                pdf.cell(190, 8, " POLITICAS IMPORTANTES / IMPORTANT POLICIES:", ln=True)
                 pdf.set_font("Arial", size=9); pdf.set_text_color(0, 0, 0)
-                pdf.multi_cell(190, 5, "This upgrade is NON-REFUNDABLE. In case of cancellation or modification of the stay, the upgrade fee will not be credited or refunded.")
+                pdf.multi_cell(190, 5, "Este upgrade es NO REEMBOLSABLE. En caso de cancelacion o modificacion de la estancia, el cargo por mejora de habitacion no sera acreditado ni devuelto.\n\nThis upgrade is NON-REFUNDABLE. In case of cancellation or modification of the stay, the upgrade fee will not be credited or refunded.")
                 
                 # Firmas
                 pdf.ln(25)
@@ -180,9 +178,8 @@ if noches > 0:
                 pdf.set_x(110)
                 pdf.cell(80, 5, "Hotel Representative", align='C')
 
-                # Botón de Descarga
-                st.download_button("📥 Download PDF", pdf.output(dest='S').encode('latin-1'), f"Upsell_{n_reserva}.pdf")
+                st.download_button("📥 Descargar Acuerdo PDF", pdf.output(dest='S').encode('latin-1'), f"Upsell_{n_reserva}.pdf")
         else:
-            st.warning("Upgrade category must be superior to Original category.")
+            st.warning("La categoría de destino debe ser superior a la original para realizar una cotización.")
 else:
-    st.error("Check-out date must be after Check-in date.")
+    st.error("La fecha de salida debe ser posterior a la fecha de entrada.")
