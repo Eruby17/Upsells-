@@ -4,12 +4,11 @@ from datetime import datetime, timedelta
 import pandas as pd
 import requests
 from io import BytesIO
-import re
 
-# --- 1. CONFIGURACIÓN DE PÁGINA ---
+# --- 1. CONFIGURACIÓN ---
 st.set_page_config(page_title="Upsell Pro - Casa Dorada", page_icon="🏨", layout="wide")
 
-# --- 2. IDENTIFICADORES DE HOJA ---
+# --- 2. IDENTIFICADORES ---
 SHEET_ID = "19hFs0Jgt58uWC_UXJ8_4aVCJVtX7fTBcHO7-iAVo1K0"
 GID_CONFIG = "481323566"  
 GID_TARIFAS = "0"          
@@ -31,9 +30,8 @@ def cargar_datos_directos():
 
 df_1, df_2 = cargar_datos_directos()
 
-# --- 4. PROCESAMIENTO DE VALORES (SIDEBAR) ---
+# --- 4. PROCESAMIENTO SIDEBAR ---
 desc_actual, tc_actual = 62.0, 17.40 
-
 if df_1 is not None:
     try:
         df_1.columns = [str(c).strip().lower() for c in df_1.columns]
@@ -41,23 +39,22 @@ if df_1 is not None:
         t_val = df_1[df_1['parametro'].str.contains('tc', case=False, na=False)]['valor'].values[0]
         desc_actual = float(str(d_val).replace(',', '.'))
         tc_actual = float(str(t_val).replace(',', '.'))
-    except:
-        pass
+    except: pass
 
-# --- FUNCIÓN PARA LIMPIAR FECHAS (DEJA SOLO NÚMEROS) ---
-def solo_numeros(texto):
-    return re.sub(r'\D', '', str(texto))
-
+# --- MOTOR DE BÚSQUEDA INTELIGENTE DE TARIFAS ---
 df_tarifas = pd.DataFrame()
 if df_2 is not None:
     try:
         df_2.columns = [str(c).strip() for c in df_2.columns]
-        # Limpiamos la fecha del Excel: "21/04/2026" -> "21042026"
-        df_2['Fecha_Num'] = df_2['Date'].apply(solo_numeros)
+        # Intentamos convertir la columna 'Date' a objetos fecha reales de Python
+        # Probamos día primero (21/04) y luego mes primero (04/21) para cubrir cualquier formato de Excel
+        df_2['Fecha_Python'] = pd.to_datetime(df_2['Date'], dayfirst=True, errors='coerce')
+        df_2.loc[df_2['Fecha_Python'].isna(), 'Fecha_Python'] = pd.to_datetime(df_2['Date'], dayfirst=False, errors='coerce')
+        
+        # Limpiamos el Rate
         df_2['Rate_Num'] = pd.to_numeric(df_2['Rate'].astype(str).str.replace(',', '.'), errors='coerce')
-        df_tarifas = df_2.dropna(subset=['Date', 'Rate_Num'])
-    except:
-        pass
+        df_tarifas = df_2.dropna(subset=['Fecha_Python', 'Rate_Num']).copy()
+    except: pass
 
 # --- 5. INTERFAZ ---
 st.title("🏨 Professional Upsell Agreement")
@@ -77,51 +74,40 @@ diferenciales = {
     "Penthouse 2PH": 1875.0, "Penthouse 3PH": 2625.0
 }
 
-# Bloque 1: Huésped y Folio
+# Bloque 1: Huésped
 col_nom, col_fol = st.columns(2)
-with col_nom:
-    cliente = st.text_input("Guest Full Name")
-with col_fol:
-    n_reserva = st.text_input("Confirmation / Folio #")
+with col_nom: cliente = st.text_input("Guest Full Name")
+with col_fol: n_reserva = st.text_input("Confirmation / Folio #")
 
 # Bloque 2: Categorías
 col_cat1, col_cat2 = st.columns(2)
-with col_cat1:
-    cat_orig = st.selectbox("Original Category", list(diferenciales.keys()))
-with col_cat2:
-    cat_dest = st.selectbox("Upgrade Category", list(diferenciales.keys()), index=3)
+with col_cat1: cat_orig = st.selectbox("Original Category", list(diferenciales.keys()))
+with col_cat2: cat_dest = st.selectbox("Upgrade Category", list(diferenciales.keys()), index=3)
 
 # Bloque 3: Fechas Separadas y Habitación
 col_in, col_out, col_hab = st.columns(3)
-with col_in:
-    check_in = st.date_input("Check-in Date", datetime.now().date())
-with col_out:
-    check_out = st.date_input("Check-out Date", datetime.now().date() + timedelta(days=1))
-with col_hab:
-    habitacion = st.text_input("Assigned Room #")
+with col_in: check_in = st.date_input("Check-in Date", datetime.now().date())
+with col_out: check_out = st.date_input("Check-out Date", datetime.now().date() + timedelta(days=1))
+with col_hab: habitacion = st.text_input("Assigned Room #")
 
 # --- 6. CÁLCULOS ---
 noches = (check_out - check_in).days
 
 if noches > 0:
-    # Convertimos la fecha del calendario a número: 21/04/2026 -> "21042026"
-    f_busqueda_num = check_in.strftime('%d%m%Y')
     tarifa_base = 0
-    
     if not df_tarifas.empty:
-        # Buscamos por coincidencia numérica exacta
-        match = df_tarifas[df_tarifas['Fecha_Num'].str.contains(f_busqueda_num, na=False)]
+        # Buscamos comparando objetos fecha (no texto), que es 100% preciso
+        match = df_tarifas[df_tarifas['Fecha_Python'].dt.date == check_in]
         if not match.empty:
             tarifa_base = float(match.iloc[0]['Rate_Num'])
     
     if tarifa_base <= 0:
         st.error(f"❌ No rate found for {check_in.strftime('%d/%m/%Y')} in Excel.")
-        with st.expander("Ver Datos Detectados (Depuración)"):
-            st.write("Buscando ID Numérico:", f_busqueda_num)
-            st.write(df_tarifas[['Date', 'Fecha_Num', 'Rate']].head(15))
+        with st.expander("Ver Datos Cargados (Depuración)"):
+            st.write("Python está buscando:", check_in)
+            st.write(df_tarifas[['Date', 'Fecha_Python', 'Rate_Num']].head(20))
     else:
         gap = (tarifa_base + diferenciales[cat_dest]) - (tarifa_base + diferenciales[cat_orig])
-        
         if gap > 0:
             final_night_usd = (gap * (1 - desc_actual/100)) * 1.30
             total_usd = final_night_usd * noches
@@ -133,7 +119,6 @@ if noches > 0:
             res1.metric("Total USD (Inc. Tax)", f"${total_usd:,.2f}")
             res2.metric("Total MXN (Inc. Tax)", f"${total_mxn:,.2f}")
 
-            # --- 7. GENERACIÓN DE PDF ---
             if st.button("📝 Generate Official PDF Agreement"):
                 pdf = FPDF()
                 pdf.add_page()
@@ -151,8 +136,7 @@ if noches > 0:
                 pdf.ln(10); pdf.set_font("Arial", 'B', 14)
                 pdf.cell(95, 12, f" TOTAL USD ${total_usd:,.2f}", border=1, align='C'); pdf.cell(95, 12, f" TOTAL MXN ${total_mxn:,.2f}", border=1, ln=True, align='C')
                 pdf.ln(30); y = pdf.get_y(); pdf.line(10, y, 90, y); pdf.line(110, y, 190, y)
-                pdf.set_y(y + 2); pdf.set_font("Arial", 'B', 9)
-                pdf.cell(80, 5, "Guest Signature", align='C'); pdf.set_x(110); pdf.cell(80, 5, "Front Desk Representative", align='C')
+                pdf.set_y(y+2); pdf.cell(80, 5, "Guest Signature", align='C'); pdf.set_x(110); pdf.cell(80, 5, "Front Desk Agent", align='C')
                 st.download_button("📥 Download PDF", pdf.output(dest='S').encode('latin-1'), f"Upsell_{n_reserva}.pdf")
         else:
             st.warning("Please select a superior category for the upgrade.")
