@@ -11,53 +11,45 @@ st.set_page_config(page_title="Upsell Pro - Casa Dorada", page_icon="🏨")
 # --- 2. CONEXIÓN ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- 3. CARGAR CONFIGURACIÓN (Pestaña 'Config') ---
+# --- 3. CARGAR CONFIGURACIÓN ---
 try:
-    # Intentamos leer la pestaña de configuración
     df_config = conn.read(worksheet="Config", ttl=0)
     df_config.columns = df_config.columns.str.strip().str.lower()
     df_config['parametro'] = df_config['parametro'].astype(str).str.strip().str.lower()
-    
     desc_actual = float(df_config[df_config['parametro'] == 'descuento']['valor'].values[0])
     tc_actual = float(df_config[df_config['parametro'] == 'tc']['valor'].values[0])
 except:
     desc_actual, tc_actual = 62.0, 17.40
 
-# --- 4. CARGAR TARIFAS (Pestaña 'Tarifas') ---
+# --- 4. CARGAR Y LIMPIAR TARIFAS (ULTRA ROBUSTO) ---
 try:
-    # Leemos la pestaña. El Error 400 a veces ocurre por datos fantasma a la derecha, 
-    # así que forzamos la lectura de columnas con datos.
     df_tarifas = conn.read(worksheet="Tarifas", ttl=0)
     
     if df_tarifas is not None and not df_tarifas.empty:
-        # Función para limpiar "mié 01/04/2026" y dejar solo "01/04/2026"
-        def extraer_fecha(texto):
+        # Función mejorada para extraer solo DD/MM/YYYY
+        def extraer_fecha_pura(texto):
+            # Busca el patrón de números: 01/04/2026
             match = re.search(r'(\d{1,2}/\d{1,2}/\d{4})', str(texto))
-            return match.group(1) if match else None
+            if match:
+                return match.group(1)
+            return None
 
-        df_tarifas['Fecha_Limpia'] = df_tarifas['Stay Date'].apply(extraer_fecha)
+        df_tarifas['Fecha_Limpia'] = df_tarifas['Stay Date'].apply(extraer_fecha_pura)
         df_tarifas = df_tarifas.dropna(subset=['Fecha_Limpia'])
-        # Convertimos a fecha real de Python para comparar con el calendario
+        
+        # Convertimos a fecha real. dayfirst=True es vital para formato DD/MM/YYYY
         df_tarifas['Fecha_Limpia'] = pd.to_datetime(df_tarifas['Fecha_Limpia'], dayfirst=True).dt.date
     else:
-        df_tarifas = pd.DataFrame()
+        st.error("La pestaña 'Tarifas' parece estar vacía.")
 except Exception as e:
-    st.error(f"Error procesando la pestaña Tarifas: {e}")
-    df_tarifas = pd.DataFrame()
+    st.error(f"Error técnico cargando Tarifas: {e}")
 
-# --- 5. DIFERENCIALES DUETTO ---
+# --- 5. DIFERENCIALES ---
 diferenciales_usd = {
-    "Standard Two Double Beds": 0.0,
-    "Junior Suite": 75.0,
-    "Deluxe Suite": 0.0,
-    "Executive Suite": 150.0,
-    "One Bedroom Suite Garden": 225.0,
-    "One Bedroom Suite": 300.0,
-    "1 Bedroom Suite Plus": 375.0,
-    "2 Bedroom Suite": 780.0,
-    "Penthouse 1PH": 1125.0,
-    "Penthouse 2PH": 1875.0,
-    "Penthouse 3PH": 2625.0
+    "Standard Two Double Beds": 0.0, "Junior Suite": 75.0, "Deluxe Suite": 0.0,
+    "Executive Suite": 150.0, "One Bedroom Suite Garden": 225.0, "One Bedroom Suite": 300.0,
+    "1 Bedroom Suite Plus": 375.0, "2 Bedroom Suite": 780.0, "Penthouse 1PH": 1125.0,
+    "Penthouse 2PH": 1875.0, "Penthouse 3PH": 2625.0
 }
 
 # --- 6. INTERFAZ ---
@@ -65,7 +57,7 @@ st.title("🏨 Room Upgrade Agreement")
 
 with st.sidebar:
     st.image("https://cdn2.paraty.es/casa-dorada/images/89eeeacd45ffd2e", width=180)
-    st.metric("Web Discount", f"{desc_actual}%")
+    st.metric("Discount", f"{desc_actual}%")
     st.metric("FX Rate", f"${tc_actual} MXN")
     if st.button("🔄 Sync Drive"):
         st.cache_data.clear()
@@ -74,12 +66,13 @@ with st.sidebar:
 col1, col2 = st.columns(2)
 with col1:
     cliente = st.text_input("Guest Name")
-    cat_orig = st.selectbox("Original Category", list(diferenciales_usd.keys()))
-    rango = st.date_input("Stay Period", value=(datetime.now().date(), (datetime.now() + timedelta(days=1)).date()))
+    cat_orig = st.selectbox("Current Category", list(diferenciales_usd.keys()))
+    # Calendario
+    rango = st.date_input("Stay Dates", value=(datetime.now().date(), (datetime.now() + timedelta(days=1)).date()))
 
 with col2:
     n_reserva = st.text_input("Confirmation #")
-    cat_dest = st.selectbox("Upgrade To", list(diferenciales_usd.keys()), index=3)
+    cat_dest = st.selectbox("Upgrade Category", list(diferenciales_usd.keys()), index=3)
     habitacion = st.text_input("Room #")
 
 # --- 7. LÓGICA DE CÁLCULO ---
@@ -88,54 +81,52 @@ if len(rango) == 2:
     noches = (check_out - check_in).days
     
     if noches > 0:
-        # Buscamos la tarifa base del día de llegada
+        # Búsqueda de tarifa
         tarifa_base = 0
         if not df_tarifas.empty:
+            # Comparamos fecha del calendario con nuestra columna limpia
             match = df_tarifas[df_tarifas['Fecha_Limpia'] == check_in]
             if not match.empty:
                 tarifa_base = float(match.iloc[0]['Current Rate'])
         
-        # Validación de Tarifa Cargada
-        if tarifa_base == 0:
-            st.error(f"❌ ERROR CRÍTICO: No se encontraron tarifas para {check_in.strftime('%B %Y')}. Por favor carga los precios en el Excel.")
+        # SI NO ENCUENTRA TARIFA
+        if tarifa_base <= 0:
+            st.error(f"❌ ERROR CRÍTICO: No se encontraron tarifas para el {check_in.strftime('%d/%m/%Y')}. Revisa que la fecha esté cargada en la pestaña 'Tarifas'.")
         else:
-            # SECUENCIA: (Tarifa Upg - Tarifa Orig) -> Descuento -> Impuestos
-            total_orig_noche = tarifa_base + diferenciales_usd[cat_orig]
-            total_upg_noche = tarifa_base + diferenciales_usd[cat_dest]
-            
-            diff_bruta = total_upg_noche - total_orig_noche
+            # Lógica financiera
+            orig_total = tarifa_base + diferenciales_usd[cat_orig]
+            upg_total = tarifa_base + diferenciales_usd[cat_dest]
+            diff_bruta = upg_total - orig_total
             
             if diff_bruta > 0:
-                factor_desc = 1 - (desc_actual / 100)
-                con_descuento = diff_bruta * factor_desc
-                total_noche_usd = con_descuento * 1.30 # + 30% Taxes
-                
-                final_usd = total_noche_usd * noches
-                final_mxn = final_usd * tc_actual
-                
+                final_noche_usd = (diff_bruta * (1 - desc_actual/100)) * 1.30
+                total_usd = final_noche_usd * noches
+                total_mxn = total_usd * tc_actual
+
                 st.divider()
-                st.success(f"Estancia de {noches} noche(s) calculada.")
+                st.success(f"Cálculo listo para {noches} noche(s).")
                 c1, c2 = st.columns(2)
-                c1.metric("Total Upgrade USD", f"${final_usd:,.2f}")
-                c2.metric("Total Upgrade MXN", f"${final_mxn:,.2f}")
+                c1.metric("Total USD (30% Tax Inc.)", f"${total_usd:,.2f}")
+                c2.metric("Total MXN (30% Tax Inc.)", f"${total_mxn:,.2f}")
 
                 # --- PDF ---
                 if st.button("📝 Generate PDF"):
                     pdf = FPDF()
                     pdf.add_page()
-                    pdf.set_font("Arial", 'B', 16)
-                    pdf.cell(0, 10, "ROOM UPGRADE AGREEMENT", ln=True, align='C')
-                    pdf.ln(10)
-                    pdf.set_font("Arial", size=11)
-                    pdf.cell(0, 8, f"Guest: {cliente.upper()}", ln=True)
-                    pdf.cell(0, 8, f"Confirmation: {n_reserva} | Room: {habitacion}", ln=True)
-                    pdf.cell(0, 8, f"Stay: {check_in} to {check_out} ({noches} nights)", ln=True)
-                    pdf.ln(5)
-                    pdf.cell(0, 8, f"From: {cat_orig}  To: {cat_dest}", ln=True)
-                    pdf.ln(10)
-                    pdf.set_font("Arial", 'B', 14)
-                    pdf.cell(0, 10, f"TOTAL DUE: USD ${final_usd:,.2f} / MXN ${final_mxn:,.2f}", ln=True)
+                    # Logo
+                    try: pdf.image("https://cdn2.paraty.es/casa-dorada/images/89eeeacd45ffd2e", 10, 8, 45)
+                    except: pass
                     
-                    st.download_button("📥 Download", pdf.output(dest='S').encode('latin-1'), f"Upgrade_{n_reserva}.pdf")
+                    pdf.ln(20); pdf.set_font("Arial", 'B', 16)
+                    pdf.cell(0, 10, "ROOM UPGRADE AGREEMENT", ln=True, align='C')
+                    pdf.ln(10); pdf.set_font("Arial", size=11)
+                    pdf.cell(0, 8, f"Guest: {cliente.upper()}", ln=True)
+                    pdf.cell(0, 8, f"Res: {n_reserva} | Room: {habitacion}", ln=True)
+                    pdf.cell(0, 8, f"Dates: {check_in} to {check_out} ({noches} nights)", ln=True)
+                    pdf.ln(5)
+                    pdf.set_font("Arial", 'B', 12)
+                    pdf.cell(0, 10, f"TOTAL: USD ${total_usd:,.2f} / MXN ${total_mxn:,.2f}", ln=True)
+                    
+                    st.download_button("📥 Download Agreement", pdf.output(dest='S').encode('latin-1'), f"Upsell_{n_reserva}.pdf")
             else:
-                st.warning("La categoría seleccionada no es superior a la original.")
+                st.warning("La categoría de upgrade debe ser superior a la original.")
