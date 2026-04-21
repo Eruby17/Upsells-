@@ -4,14 +4,15 @@ from datetime import datetime, timedelta
 import pandas as pd
 import requests
 from io import BytesIO
+import re
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Upsell Pro - Casa Dorada", page_icon="🏨", layout="wide")
 
 # --- 2. IDENTIFICADORES DE HOJA ---
 SHEET_ID = "19hFs0Jgt58uWC_UXJ8_4aVCJVtX7fTBcHO7-iAVo1K0"
-GID_CONFIG = "481323566"  # Pestaña 1
-GID_TARIFAS = "0"          # Pestaña 2
+GID_CONFIG = "481323566"  
+GID_TARIFAS = "0"          
 LOGO_URL = "https://cdn2.paraty.es/casa-dorada/images/89eeeacd45ffd2e"
 
 def get_csv_url(gid):
@@ -43,11 +44,16 @@ if df_1 is not None:
     except:
         pass
 
+# --- FUNCIÓN PARA LIMPIAR FECHAS (DEJA SOLO NÚMEROS) ---
+def solo_numeros(texto):
+    return re.sub(r'\D', '', str(texto))
+
 df_tarifas = pd.DataFrame()
 if df_2 is not None:
     try:
         df_2.columns = [str(c).strip() for c in df_2.columns]
-        df_2['Fecha_Texto'] = df_2['Date'].astype(str).str.strip()
+        # Limpiamos la fecha del Excel: "21/04/2026" -> "21042026"
+        df_2['Fecha_Num'] = df_2['Date'].apply(solo_numeros)
         df_2['Rate_Num'] = pd.to_numeric(df_2['Rate'].astype(str).str.replace(',', '.'), errors='coerce')
         df_tarifas = df_2.dropna(subset=['Date', 'Rate_Num'])
     except:
@@ -78,7 +84,7 @@ with col_nom:
 with col_fol:
     n_reserva = st.text_input("Confirmation / Folio #")
 
-# Bloque 2: Categorías (Misma altura)
+# Bloque 2: Categorías
 col_cat1, col_cat2 = st.columns(2)
 with col_cat1:
     cat_orig = st.selectbox("Original Category", list(diferenciales.keys()))
@@ -98,21 +104,22 @@ with col_hab:
 noches = (check_out - check_in).days
 
 if noches > 0:
-    # Búsqueda de tarifa usando la fecha de entrada
-    f_busqueda = check_in.strftime('%d/%m/%Y')
+    # Convertimos la fecha del calendario a número: 21/04/2026 -> "21042026"
+    f_busqueda_num = check_in.strftime('%d%m%Y')
     tarifa_base = 0
     
     if not df_tarifas.empty:
-        match = df_tarifas[df_tarifas['Fecha_Texto'].str.contains(f_busqueda, na=False)]
+        # Buscamos por coincidencia numérica exacta
+        match = df_tarifas[df_tarifas['Fecha_Num'].str.contains(f_busqueda_num, na=False)]
         if not match.empty:
             tarifa_base = float(match.iloc[0]['Rate_Num'])
     
     if tarifa_base <= 0:
-        st.error(f"❌ No rate found for {f_busqueda} in Excel.")
-        with st.expander("Check Detected Data"):
-            st.write(df_tarifas[['Date', 'Rate']].head(10))
+        st.error(f"❌ No rate found for {check_in.strftime('%d/%m/%Y')} in Excel.")
+        with st.expander("Ver Datos Detectados (Depuración)"):
+            st.write("Buscando ID Numérico:", f_busqueda_num)
+            st.write(df_tarifas[['Date', 'Fecha_Num', 'Rate']].head(15))
     else:
-        # Lógica: (Upg - Orig) -> Descuento -> Impuestos (30%)
         gap = (tarifa_base + diferenciales[cat_dest]) - (tarifa_base + diferenciales[cat_orig])
         
         if gap > 0:
@@ -130,46 +137,22 @@ if noches > 0:
             if st.button("📝 Generate Official PDF Agreement"):
                 pdf = FPDF()
                 pdf.add_page()
-                
                 try:
                     resp = requests.get(LOGO_URL, timeout=5)
-                    logo_img = BytesIO(resp.content)
-                    pdf.image(logo_img, 10, 8, 45)
+                    pdf.image(BytesIO(resp.content), 10, 8, 45)
                 except: pass
-                
-                pdf.ln(20)
-                pdf.set_font("Arial", 'B', 16)
+                pdf.ln(20); pdf.set_font("Arial", 'B', 16)
                 pdf.cell(0, 10, "ROOM UPGRADE AGREEMENT", ln=True, align='C')
-                pdf.ln(10)
-                
-                # Tabla de Detalles
-                pdf.set_font("Arial", 'B', 10); pdf.set_fill_color(240, 240, 240)
-                pdf.cell(190, 8, " RESERVATION DETAILS", ln=True, fill=True)
-                pdf.set_font("Arial", size=10)
-                pdf.cell(95, 8, f" Guest: {cliente.upper()}", border='B')
-                pdf.cell(95, 8, f" Confirmation: {n_reserva}", border='B', ln=True)
-                pdf.cell(95, 8, f" Arrival: {check_in.strftime('%d/%m/%Y')}", border='B')
-                pdf.cell(95, 8, f" Departure: {check_out.strftime('%d/%m/%Y')}", border='B', ln=True)
-                pdf.cell(95, 8, f" Nights: {noches}", border='B')
-                pdf.cell(95, 8, f" Room: {habitacion}", border='B', ln=True)
-                pdf.ln(10)
-                
-                pdf.set_font("Arial", 'B', 11)
-                pdf.cell(190, 8, f" Original Category: {cat_orig}", ln=True)
-                pdf.cell(190, 8, f" Upgraded to: {cat_dest}", ln=True)
-                pdf.ln(10)
-                
-                pdf.set_font("Arial", 'B', 14)
-                pdf.cell(95, 12, f" TOTAL USD ${total_usd:,.2f}", border=1, align='C')
-                pdf.cell(95, 12, f" TOTAL MXN ${total_mxn:,.2f}", border=1, ln=True, align='C')
-                
-                # Firmas
-                pdf.ln(30)
-                y = pdf.get_y(); pdf.line(10, y, 90, y); pdf.line(110, y, 190, y)
+                pdf.ln(10); pdf.set_font("Arial", 'B', 10); pdf.set_fill_color(240, 240, 240)
+                pdf.cell(190, 8, " DETAILS", ln=True, fill=True); pdf.set_font("Arial", size=10)
+                pdf.cell(95, 8, f" Guest: {cliente.upper()}", border='B'); pdf.cell(95, 8, f" Confirmation: {n_reserva}", border='B', ln=True)
+                pdf.cell(95, 8, f" Arrival: {check_in.strftime('%d/%m/%Y')}", border='B'); pdf.cell(95, 8, f" Departure: {check_out.strftime('%d/%m/%Y')}", border='B', ln=True)
+                pdf.cell(95, 8, f" Nights: {noches}", border='B'); pdf.cell(95, 8, f" Room: {habitacion}", border='B', ln=True)
+                pdf.ln(10); pdf.set_font("Arial", 'B', 14)
+                pdf.cell(95, 12, f" TOTAL USD ${total_usd:,.2f}", border=1, align='C'); pdf.cell(95, 12, f" TOTAL MXN ${total_mxn:,.2f}", border=1, ln=True, align='C')
+                pdf.ln(30); y = pdf.get_y(); pdf.line(10, y, 90, y); pdf.line(110, y, 190, y)
                 pdf.set_y(y + 2); pdf.set_font("Arial", 'B', 9)
-                pdf.cell(80, 5, "Guest Signature", align='C')
-                pdf.set_x(110); pdf.cell(80, 5, "Front Desk Representative", align='C')
-
+                pdf.cell(80, 5, "Guest Signature", align='C'); pdf.set_x(110); pdf.cell(80, 5, "Front Desk Representative", align='C')
                 st.download_button("📥 Download PDF", pdf.output(dest='S').encode('latin-1'), f"Upsell_{n_reserva}.pdf")
         else:
             st.warning("Please select a superior category for the upgrade.")
