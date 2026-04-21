@@ -41,18 +41,22 @@ if df_1 is not None:
         tc_actual = float(str(t_val).replace(',', '.'))
     except: pass
 
-# --- MOTOR DE TARIFAS (CON CONVERSIÓN FORZADA) ---
+# --- MOTOR DE TARIFAS (RECONSTRUCCIÓN TOTAL) ---
 df_tarifas = pd.DataFrame()
 if df_2 is not None:
     try:
         df_2.columns = [str(c).strip() for c in df_2.columns]
-        # Forzamos que la columna 'Date' se convierta a fecha real de Python, entendiendo que el día va primero (21/04)
-        df_2['Fecha_Real'] = pd.to_datetime(df_2['Date'], dayfirst=True, errors='coerce').dt.date
-        # Limpiamos el Rate
-        df_2['Rate_Num'] = pd.to_numeric(df_2['Rate'].astype(str).str.replace(',', '.'), errors='coerce')
-        df_tarifas = df_2.dropna(subset=['Fecha_Real', 'Rate_Num']).copy()
+        
+        # Intentamos convertir la columna 'Date' detectando automáticamente el formato
+        # Si viene como 21/04/2026, esto lo convertirá correctamente a un objeto de fecha
+        df_2['Fecha_Final'] = pd.to_datetime(df_2['Date'], errors='coerce', dayfirst=True).dt.date
+        
+        # Limpiamos el Rate (asegurando que sea número)
+        df_2['Rate_Num'] = pd.to_numeric(df_2['Rate'].astype(str).str.replace(',', '.').str.extract('(\d+\.?\d*)')[0], errors='coerce')
+        
+        df_tarifas = df_2.dropna(subset=['Fecha_Final', 'Rate_Num']).copy()
     except Exception as e:
-        st.error(f"Error procesando fechas: {e}")
+        st.error(f"Error procesando el tarifario: {e}")
 
 # --- 5. INTERFAZ ---
 st.title("🏨 Professional Upsell Agreement")
@@ -94,16 +98,24 @@ noches = (check_out - check_in).days
 if noches > 0:
     tarifa_base = 0
     if not df_tarifas.empty:
-        # Aquí comparamos fecha real contra fecha real (ambas son objetos date de Python)
-        match = df_tarifas[df_tarifas['Fecha_Real'] == check_in]
+        # Aquí comparamos los objetos date directamente
+        # check_in ya es date, Fecha_Final ya es date.
+        match = df_tarifas[df_tarifas['Fecha_Final'] == check_in]
+        
         if not match.empty:
             tarifa_base = float(match.iloc[0]['Rate_Num'])
     
     if tarifa_base <= 0:
         st.error(f"❌ No rate found for {check_in.strftime('%d/%m/%Y')} in Excel.")
-        with st.expander("Depuración: Datos en Memoria"):
-            st.write("Python busca:", check_in, type(check_in))
-            st.write(df_tarifas[['Date', 'Fecha_Real', 'Rate_Num']].head(20))
+        # PANEL DE DEPURACIÓN MEJORADO
+        with st.expander("Panel de Depuración - Revisión de Fechas"):
+            st.write("1. Fecha que buscas (Calendario):", check_in, type(check_in))
+            if not df_tarifas.empty:
+                st.write("2. Primeras fechas detectadas en tu Excel:")
+                st.write(df_tarifas[['Date', 'Fecha_Final', 'Rate_Num']].head(10))
+                st.write("3. Tipos de datos en la tabla:", df_tarifas.dtypes)
+            else:
+                st.warning("La tabla de tarifas está vacía después de procesar. Revisa los encabezados 'Date' y 'Rate'.")
     else:
         gap = (tarifa_base + diferenciales[cat_dest]) - (tarifa_base + diferenciales[cat_orig])
         if gap > 0:
