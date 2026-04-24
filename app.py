@@ -3,7 +3,7 @@ from fpdf import FPDF
 from datetime import datetime, timedelta
 import pandas as pd
 import requests
-from io import BytesIO
+import os
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Cotizador de upsells - Casa Dorada", page_icon="🏨", layout="wide")
@@ -12,7 +12,6 @@ st.set_page_config(page_title="Cotizador de upsells - Casa Dorada", page_icon="�
 SHEET_ID = "19hFs0Jgt58uWC_UXJ8_4aVCJVtX7fTBcHO7-iAVo1K0"
 GID_CONFIG = "481323566"  
 GID_TARIFAS = "0"          
-# URL proporcionada por el usuario
 LOGO_URL = "https://cdn2.paraty.es/casa-dorada/images/89eeeacd45ffd2e"
 
 def get_csv_url(gid):
@@ -29,15 +28,16 @@ def obtener_datos_remotos():
 
 def procesar_informacion():
     df_1, df_2 = obtener_datos_remotos()
-    desc_actual, tc_actual = 62.0, 18.00
+    tc_actual = 17.40 
+    desc_actual = 62.0
     df_tarifas_limpias = pd.DataFrame()
 
     if df_1 is not None:
         try:
             df_1.columns = [str(c).strip().lower() for c in df_1.columns]
             d_val = df_1[df_1['parametro'].str.contains('descuento', na=False)]['valor'].values[0]
-            t_val = df_1[df_1['parametro'].str.contains('tc', na=False)]['valor'].values[0]
             desc_actual = float(str(d_val).replace(',', '.'))
+            t_val = df_1[df_1['parametro'].str.contains('tc', na=False)]['valor'].values[0]
             tc_actual = float(str(t_val).replace(',', '.'))
         except: pass
 
@@ -85,14 +85,12 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
     else:
         with st.spinner("Buscando tarifas..."):
             filtro = df_tarifas[df_tarifas['Fecha_Final'] <= check_in].sort_values('Fecha_Final', ascending=False)
-            tarifa_base = float(filtro.iloc[0]['Rate_Num']) if not filtro.empty else 0
             
             gap = diferenciales[cat_dest] - diferenciales[cat_orig]
             precio_noche_usd = (gap * (1 - desc_actual/100)) * 1.30
             total_usd = precio_noche_usd * noches
             total_mxn = total_usd * tc_actual
 
-            # Mostrar resultados en pantalla
             res1, res2, res3 = st.columns(3)
             res1.metric("USD / Noche (Imp. Incl.)", f"${precio_noche_usd:,.2f}")
             res2.metric("Total USD", f"${total_usd:,.2f}")
@@ -102,26 +100,27 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             pdf = FPDF()
             pdf.add_page()
             
-            # 1. Logo Superior Izquierda (Carga desde URL directa)
+            logo_path = "temp_logo.png"
             try:
                 r = requests.get(LOGO_URL, timeout=10)
                 if r.status_code == 200:
-                    img = BytesIO(r.content)
-                    pdf.image(img, 10, 10, 50) 
+                    with open(logo_path, "wb") as f:
+                        f.write(r.content)
+                    pdf.image(logo_path, 10, 10, 50) 
             except:
                 pdf.set_font("Arial", 'B', 12)
                 pdf.cell(0, 10, "CASA DORADA LOS CABOS", ln=True)
 
             pdf.ln(30)
             
-            # 2. Encabezado
+            # Encabezado
             pdf.set_font("Arial", 'B', 16)
             pdf.cell(0, 10, "ROOM UPGRADE AGREEMENT", ln=True, align='R')
             pdf.set_font("Arial", '', 10)
             pdf.cell(0, 5, f"Date: {datetime.now().strftime('%d/%m/%Y')}", ln=True, align='R')
             pdf.ln(10)
 
-            # 3. Datos del Huésped
+            # Datos del Huésped
             pdf.set_fill_color(30, 55, 110) 
             pdf.set_text_color(255, 255, 255)
             pdf.set_font("Arial", 'B', 11)
@@ -136,7 +135,7 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             pdf.cell(95, 8, f"Check-out: {check_out.strftime('%d %b, %Y')}", ln=True)
             pdf.ln(8)
 
-            # 4. Tabla de Upgrade Profesional
+            # Tabla de Upgrade
             pdf.set_text_color(255, 255, 255)
             pdf.set_font("Arial", 'B', 11)
             pdf.cell(0, 8, "  ROOM UPGRADE DETAILS", ln=True, fill=True)
@@ -156,18 +155,21 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             pdf.cell(145, 12, f"  {cat_dest}", border='B', ln=True)
             pdf.ln(10)
 
-            # 5. Totales
+            # --- SECCIÓN DE TOTALES CON TIPO DE CAMBIO CLARO ---
             pdf.set_font("Arial", 'B', 12)
             pdf.cell(120, 10, "Total Upgrade Fee (Including Taxes):", border='T')
             pdf.set_font("Arial", 'B', 14)
             pdf.cell(70, 10, f"USD ${total_usd:,.2f}", border='T', align='R', ln=True)
             
-            pdf.set_font("Arial", '', 10)
-            pdf.cell(120, 8, f"Charge in Mexican Pesos (T.C. {tc_actual}):")
-            pdf.cell(70, 8, f"MXN ${total_mxn:,.2f}*", align='R', ln=True)
+            # Línea explicativa del Tipo de Cambio
+            pdf.set_font("Arial", 'I', 10)
+            pdf.cell(120, 8, f"Exchange Rate / Tipo de Cambio (1 USD = {tc_actual} MXN):")
+            pdf.set_font("Arial", 'B', 12)
+            pdf.cell(70, 8, f"MXN ${total_mxn:,.2f}", align='R', ln=True)
+            
             pdf.ln(15)
 
-            # 6. Políticas y Firmas
+            # Políticas y Firmas
             pdf.set_font("Arial", 'I', 9)
             pdf.multi_cell(0, 5, "Terms: This upgrade is non-refundable and applies for the entire stay.\nEste upgrade no es reembolsable y aplica por la estancia completa.")
             
@@ -179,6 +181,9 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             pdf.set_x(125)
             pdf.cell(75, 10, "Front Office Representative", align='C')
 
-            # Botón de Descarga
-            res_pdf = pdf.output(dest='S').encode('latin-1', errors='replace')
-            st.download_button("📥 Descargar PDF", res_pdf, f"Upsell_{n_reserva}.pdf", "application/pdf", use_container_width=True)
+            pdf_output = pdf.output(dest='S').encode('latin-1', errors='replace')
+            
+            if os.path.exists(logo_path):
+                os.remove(logo_path)
+
+            st.download_button("📥 Descargar Acuerdo PDF", pdf_output, f"Upsell_{n_reserva}.pdf", "application/pdf", use_container_width=True)
