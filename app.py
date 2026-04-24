@@ -6,14 +6,14 @@ import requests
 from io import BytesIO
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Cotizador Casa Dorada", page_icon="🏨", layout="wide")
+st.set_page_config(page_title="Cotizador de upsells - Casa Dorada", page_icon="🏨", layout="wide")
 
 # --- 2. IDENTIFICADORES Y URLS ---
 SHEET_ID = "19hFs0Jgt58uWC_UXJ8_4aVCJVtX7fTBcHO7-iAVo1K0"
 GID_CONFIG = "481323566"  
 GID_TARIFAS = "0"          
-# URL Directa Raw de GitHub
-LOGO_URL = "https://raw.githubusercontent.com/Eruby17/Upsells-/main/logo%2012.png"
+# URL proporcionada por el usuario
+LOGO_URL = "https://cdn2.paraty.es/casa-dorada/images/89eeeacd45ffd2e"
 
 def get_csv_url(gid):
     return f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={gid}"
@@ -54,17 +54,16 @@ def procesar_informacion():
 desc_actual, tc_actual, df_tarifas = procesar_informacion()
 
 # --- 3. INTERFAZ ---
-st.title("🏨 Cotizador de Upsells Premium")
+st.title("🏨 Cotizador de upsells")
 
 col_nom, col_fol = st.columns(2)
-with col_nom: cliente = st.text_input("Huésped")
-with col_fol: n_reserva = st.text_input("Confirmación")
+with col_nom: cliente = st.text_input("Nombre del Huésped")
+with col_fol: n_reserva = st.text_input("Número de Confirmación")
 
-col_in, col_out, col_noche = st.columns([2,2,1])
-with col_in: check_in = st.date_input("Entrada", datetime.now().date())
-with col_out: check_out = st.date_input("Salida", datetime.now().date() + timedelta(days=1))
+col_in, col_out = st.columns(2)
+with col_in: check_in = st.date_input("Check-in", datetime.now().date())
+with col_out: check_out = st.date_input("Check-out", datetime.now().date() + timedelta(days=1))
 noches = (check_out - check_in).days
-with col_noche: st.metric("Noches", noches)
 
 diferenciales = {
     "Standard Two Double Beds": 0.0, "Junior Suite": 75.0, "Deluxe Suite": 0.0,
@@ -74,17 +73,17 @@ diferenciales = {
 }
 
 col_cat1, col_cat2 = st.columns(2)
-with col_cat1: cat_orig = st.selectbox("Categoría Reservada", list(diferenciales.keys()))
-with col_cat2: cat_dest = st.selectbox("Categoría de Upgrade", list(diferenciales.keys()), index=3)
+with col_cat1: cat_orig = st.selectbox("Categoría Original", list(diferenciales.keys()))
+with col_cat2: cat_dest = st.selectbox("Upgrade a Categoría", list(diferenciales.keys()), index=1)
 
 st.divider()
 
 # --- 4. CÁLCULOS Y PDF ---
-if st.button("📊 Generar Acuerdo Profesional", type="primary", use_container_width=True):
+if st.button("💰 Calcular Cotización", type="primary", use_container_width=True):
     if noches <= 0:
-        st.error("Revisar fechas.")
+        st.error("La fecha de salida debe ser posterior a la de entrada.")
     else:
-        with st.spinner("Generando documento..."):
+        with st.spinner("Buscando tarifas..."):
             filtro = df_tarifas[df_tarifas['Fecha_Final'] <= check_in].sort_values('Fecha_Final', ascending=False)
             tarifa_base = float(filtro.iloc[0]['Rate_Num']) if not filtro.empty else 0
             
@@ -93,19 +92,23 @@ if st.button("📊 Generar Acuerdo Profesional", type="primary", use_container_w
             total_usd = precio_noche_usd * noches
             total_mxn = total_usd * tc_actual
 
-            # --- PDF DESIGN ---
+            # Mostrar resultados en pantalla
+            res1, res2, res3 = st.columns(3)
+            res1.metric("USD / Noche (Imp. Incl.)", f"${precio_noche_usd:,.2f}")
+            res2.metric("Total USD", f"${total_usd:,.2f}")
+            res3.metric("Total MXN", f"${total_mxn:,.2f}")
+
+            # --- GENERACIÓN DE PDF ---
             pdf = FPDF()
             pdf.add_page()
             
-            # 1. Logo Superior Izquierda (Ajustado)
+            # 1. Logo Superior Izquierda (Carga desde URL directa)
             try:
-                # Forzamos User-Agent para evitar bloqueos de GitHub
-                headers = {'User-Agent': 'Mozilla/5.0'}
-                r = requests.get(LOGO_URL, headers=headers, timeout=10)
+                r = requests.get(LOGO_URL, timeout=10)
                 if r.status_code == 200:
                     img = BytesIO(r.content)
-                    pdf.image(img, 10, 10, 55) 
-            except Exception as e:
+                    pdf.image(img, 10, 10, 50) 
+            except:
                 pdf.set_font("Arial", 'B', 12)
                 pdf.cell(0, 10, "CASA DORADA LOS CABOS", ln=True)
 
@@ -119,7 +122,7 @@ if st.button("📊 Generar Acuerdo Profesional", type="primary", use_container_w
             pdf.ln(10)
 
             # 3. Datos del Huésped
-            pdf.set_fill_color(30, 55, 110) # Azul Marino
+            pdf.set_fill_color(30, 55, 110) 
             pdf.set_text_color(255, 255, 255)
             pdf.set_font("Arial", 'B', 11)
             pdf.cell(0, 8, "  GUEST INFORMATION", ln=True, fill=True)
@@ -133,26 +136,24 @@ if st.button("📊 Generar Acuerdo Profesional", type="primary", use_container_w
             pdf.cell(95, 8, f"Check-out: {check_out.strftime('%d %b, %Y')}", ln=True)
             pdf.ln(8)
 
-            # 4. Tabla de Upgrade (DISEÑO PROFESIONAL)
+            # 4. Tabla de Upgrade Profesional
             pdf.set_text_color(255, 255, 255)
             pdf.set_font("Arial", 'B', 11)
             pdf.cell(0, 8, "  ROOM UPGRADE DETAILS", ln=True, fill=True)
             
             pdf.set_text_color(0, 0, 0)
             pdf.ln(2)
-            # Fila "De:"
             pdf.set_fill_color(240, 240, 240)
             pdf.set_font("Arial", 'B', 10)
-            pdf.cell(40, 10, "  Original Room:", border='B', fill=True)
+            pdf.cell(45, 10, "  Original Room:", border='B', fill=True)
             pdf.set_font("Arial", '', 10)
-            pdf.cell(150, 10, f"  {cat_orig}", border='B', ln=True)
+            pdf.cell(145, 10, f"  {cat_orig}", border='B', ln=True)
             
-            # Fila "A:"
-            pdf.set_fill_color(230, 240, 255) # Azul clarito para resaltar el nuevo
+            pdf.set_fill_color(230, 240, 255) 
             pdf.set_font("Arial", 'B', 10)
-            pdf.cell(40, 12, "  UPGRADED TO:", border='B', fill=True)
+            pdf.cell(45, 12, "  UPGRADED TO:", border='B', fill=True)
             pdf.set_font("Arial", 'B', 11)
-            pdf.cell(150, 12, f"  {cat_dest}", border='B', ln=True)
+            pdf.cell(145, 12, f"  {cat_dest}", border='B', ln=True)
             pdf.ln(10)
 
             # 5. Totales
@@ -163,12 +164,12 @@ if st.button("📊 Generar Acuerdo Profesional", type="primary", use_container_w
             
             pdf.set_font("Arial", '', 10)
             pdf.cell(120, 8, f"Charge in Mexican Pesos (T.C. {tc_actual}):")
-            pdf.cell(70, 8, f"MXN ${total_mxn:,.2f}", align='R', ln=True)
+            pdf.cell(70, 8, f"MXN ${total_mxn:,.2f}*", align='R', ln=True)
             pdf.ln(15)
 
             # 6. Políticas y Firmas
             pdf.set_font("Arial", 'I', 9)
-            pdf.multi_cell(0, 5, "Terms: This upgrade is non-refundable and applies for the entire stay. Fees are subject to the exchange rate of the day of payment.\nEste upgrade no es reembolsable y aplica por la estancia completa.")
+            pdf.multi_cell(0, 5, "Terms: This upgrade is non-refundable and applies for the entire stay.\nEste upgrade no es reembolsable y aplica por la estancia completa.")
             
             pdf.ln(25)
             pdf.line(10, pdf.get_y(), 85, pdf.get_y())
@@ -178,8 +179,6 @@ if st.button("📊 Generar Acuerdo Profesional", type="primary", use_container_w
             pdf.set_x(125)
             pdf.cell(75, 10, "Front Office Representative", align='C')
 
-            # --- DESCARGA ---
+            # Botón de Descarga
             res_pdf = pdf.output(dest='S').encode('latin-1', errors='replace')
-            st.download_button("📥 Descargar Acuerdo PDF", res_pdf, f"Upsell_{n_reserva}.pdf", "application/pdf", use_container_width=True)
-            
-            st.success(f"Acuerdo listo. Total: ${total_usd:,.2f} USD")
+            st.download_button("📥 Descargar PDF", res_pdf, f"Upsell_{n_reserva}.pdf", "application/pdf", use_container_width=True)
