@@ -10,8 +10,8 @@ st.set_page_config(page_title="Cotizador de upsells - Casa Dorada", page_icon="�
 
 # --- 2. IDENTIFICADORES Y URLS ---
 SHEET_ID = "19hFs0Jgt58uWC_UXJ8_4aVCJVtX7fTBcHO7-iAVo1K0"
-GID_CONFIG = "481323566"  
-GID_TARIFAS = "0"          
+GID_CONFIG = "481323566"
+GID_TARIFAS = "0"
 LOGO_URL = "https://cdn2.paraty.es/casa-dorada/images/89eeeacd45ffd2e"
 
 def get_csv_url(gid):
@@ -28,9 +28,8 @@ def obtener_datos_remotos():
 
 def procesar_informacion():
     df_1, df_2 = obtener_datos_remotos()
-    # Valores base por si falla la conexión
-    tc_actual = 17.40 
-    desc_actual = 62.0
+    tc_base = 17.40 
+    desc_base = 62.0
     df_tarifas_limpias = pd.DataFrame()
 
     if df_1 is not None:
@@ -38,8 +37,8 @@ def procesar_informacion():
             df_1.columns = [str(c).strip().lower() for c in df_1.columns]
             d_val = df_1[df_1['parametro'].str.contains('descuento', na=False)]['valor'].values[0]
             t_val = df_1[df_1['parametro'].str.contains('tc', na=False)]['valor'].values[0]
-            desc_actual = float(str(d_val).replace(',', '.'))
-            tc_actual = float(str(t_val).replace(',', '.'))
+            desc_base = float(str(d_val).replace(',', '.'))
+            tc_base = float(str(t_val).replace(',', '.'))
         except: pass
 
     if df_2 is not None:
@@ -50,16 +49,24 @@ def procesar_informacion():
             df_tarifas_limpias = df_2.dropna(subset=['Fecha_Final', 'Rate_Num']).copy()
         except: pass
         
-    return desc_actual, tc_actual, df_tarifas_limpias
+    return desc_base, tc_base, df_tarifas_limpias
 
-desc_actual, tc_actual, df_tarifas = procesar_informacion()
+desc_actual, tc_desde_drive, df_tarifas = procesar_informacion()
 
 # --- 3. PANEL LATERAL (SIDEBAR) ---
 with st.sidebar:
     st.image(LOGO_URL, use_container_width=True)
     st.header("Configuración")
     st.metric("Descuento Aplicado", f"{desc_actual}%")
-    st.metric("Tipo de Cambio", f"${tc_actual} MXN")
+    
+    tc_actual = st.number_input(
+        "Tipo de Cambio (MXN)",
+        min_value=1.0,
+        value=float(tc_desde_drive),
+        step=0.1,
+        format="%.2f"
+    )
+    
     st.divider()
     if st.button("🔄 Sincronizar Datos"):
         st.cache_data.clear()
@@ -95,18 +102,18 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
     if noches <= 0:
         st.error("La fecha de salida debe ser posterior a la de entrada.")
     else:
-        with st.spinner("Buscando tarifas..."):
-            filtro = df_tarifas[df_tarifas['Fecha_Final'] <= check_in].sort_values('Fecha_Final', ascending=False)
-            
+        with st.spinner("Calculando..."):
             gap = diferenciales[cat_dest] - diferenciales[cat_orig]
             precio_noche_usd = (gap * (1 - desc_actual/100)) * 1.30
             total_usd = precio_noche_usd * noches
             total_mxn = total_usd * tc_actual
 
-            res1, res2, res3 = st.columns(3)
-            res1.metric("USD / Noche (Imp. Incl.)", f"${precio_noche_usd:,.2f}")
-            res2.metric("Total USD", f"${total_usd:,.2f}")
-            res3.metric("Total MXN", f"${total_mxn:,.2f}")
+            # Visualización en Streamlit
+            res1, res2, res3, res4 = st.columns(4)
+            res1.metric("Noches", f"{noches}")
+            res2.metric("USD / Noche", f"${precio_noche_usd:,.2f}")
+            res3.metric("Total USD", f"${total_usd:,.2f}")
+            res4.metric("Total MXN", f"${total_mxn:,.2f}")
 
             # --- GENERACIÓN DE PDF ---
             pdf = FPDF()
@@ -124,14 +131,13 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
                 pdf.cell(0, 10, "CASA DORADA LOS CABOS", ln=True)
 
             pdf.ln(30)
-            
             pdf.set_font("Arial", 'B', 16)
             pdf.cell(0, 10, "ROOM UPGRADE AGREEMENT", ln=True, align='R')
             pdf.set_font("Arial", '', 10)
             pdf.cell(0, 5, f"Date: {datetime.now().strftime('%d/%m/%Y')}", ln=True, align='R')
             pdf.ln(10)
 
-            # Bloque Información
+            # Información del Huésped
             pdf.set_fill_color(30, 55, 110) 
             pdf.set_text_color(255, 255, 255)
             pdf.set_font("Arial", 'B', 11)
@@ -144,9 +150,10 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             pdf.cell(95, 8, f"Confirmation: {n_reserva}", ln=True)
             pdf.cell(95, 8, f"Check-in: {check_in.strftime('%d %b, %Y')}")
             pdf.cell(95, 8, f"Check-out: {check_out.strftime('%d %b, %Y')}", ln=True)
-            pdf.ln(8)
+            pdf.cell(95, 8, f"Number of Nights: {noches}", ln=True)
+            pdf.ln(5)
 
-            # Bloque Upgrade
+            # Detalles del Upgrade
             pdf.set_text_color(255, 255, 255)
             pdf.set_font("Arial", 'B', 11)
             pdf.cell(0, 8, "  ROOM UPGRADE DETAILS", ln=True, fill=True)
@@ -155,18 +162,22 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             pdf.ln(2)
             pdf.set_fill_color(240, 240, 240)
             pdf.set_font("Arial", 'B', 10)
-            pdf.cell(45, 10, "  Original Room:", border='B', fill=True)
+            pdf.cell(60, 10, "  Original Room:", border='B', fill=True)
             pdf.set_font("Arial", '', 10)
-            pdf.cell(145, 10, f"  {cat_orig}", border='B', ln=True)
+            pdf.cell(130, 10, f"  {cat_orig}", border='B', ln=True)
             
             pdf.set_fill_color(230, 240, 255) 
             pdf.set_font("Arial", 'B', 10)
-            pdf.cell(45, 12, "  UPGRADED TO:", border='B', fill=True)
+            pdf.cell(60, 12, "  UPGRADED TO:", border='B', fill=True)
             pdf.set_font("Arial", 'B', 11)
-            pdf.cell(145, 12, f"  {cat_dest}", border='B', ln=True)
-            pdf.ln(10)
+            pdf.cell(130, 12, f"  {cat_dest}", border='B', ln=True)
+            pdf.ln(5)
 
-            # Bloque Totales con T.C. Explicado
+            # Desglose de Costos
+            pdf.set_font("Arial", '', 11)
+            pdf.cell(120, 10, f"Upgrade Fee per Night ({noches} nights):")
+            pdf.cell(70, 10, f"USD ${precio_noche_usd:,.2f}", align='R', ln=True)
+            
             pdf.set_font("Arial", 'B', 12)
             pdf.cell(120, 10, "Total Upgrade Fee (Including Taxes):", border='T')
             pdf.set_font("Arial", 'B', 14)
@@ -178,7 +189,6 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             pdf.cell(70, 8, f"MXN ${total_mxn:,.2f}", align='R', ln=True)
             
             pdf.ln(15)
-
             pdf.set_font("Arial", 'I', 9)
             pdf.multi_cell(0, 5, "Terms: This upgrade is non-refundable and applies for the entire stay.\nEste upgrade no es reembolsable y aplica por la estancia completa.")
             
@@ -191,8 +201,6 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             pdf.cell(75, 10, "Front Office Representative", align='C')
 
             pdf_output = pdf.output(dest='S').encode('latin-1', errors='replace')
-            
-            if os.path.exists(logo_path):
-                os.remove(logo_path)
+            if os.path.exists(logo_path): os.remove(logo_path)
 
             st.download_button("📥 Descargar Acuerdo PDF", pdf_output, f"Upsell_{n_reserva}.pdf", "application/pdf", use_container_width=True)
