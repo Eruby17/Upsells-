@@ -190,7 +190,11 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             
             pdf.ln(15)
             pdf.set_font("Arial", 'I', 9)
-            pdf.multi_cell(0, 5, "Terms: This upgrade is non-refundable and applies for the entire stay.\nEste upgrade no es reembolsable y aplica por la estancia completa.")
+            pdf.multi_cell(0, 5, "Terms: "Terms: This upgrade is non-refundable and applies for the entire stay. "
+    "In the event of an early departure, no refund will be issued for the upsell.\n"
+    "Este upgrade no es reembolsable y aplica por la estancia completa. "
+    "En caso de salida anticipada, no aplicará ningún reembolso por el upsell."
+)
             
             pdf.ln(25)
             pdf.line(10, pdf.get_y(), 85, pdf.get_y())
