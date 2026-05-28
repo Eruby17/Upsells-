@@ -141,7 +141,7 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             pdf.set_fill_color(30, 55, 110) 
             pdf.set_text_color(255, 255, 255)
             pdf.set_font("Arial", 'B', 11)
-            pdf.cell(0, 8, "  GUEST INFORMATION", ln=True, fill=True)
+            pdf.cell(0, 8, "   GUEST INFORMATION", ln=True, fill=True)
             
             pdf.set_text_color(0, 0, 0)
             pdf.set_font("Arial", '', 11)
@@ -156,21 +156,21 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             # Detalles del Upgrade
             pdf.set_text_color(255, 255, 255)
             pdf.set_font("Arial", 'B', 11)
-            pdf.cell(0, 8, "  ROOM UPGRADE DETAILS", ln=True, fill=True)
+            pdf.cell(0, 8, "   ROOM UPGRADE DETAILS", ln=True, fill=True)
             
             pdf.set_text_color(0, 0, 0)
             pdf.ln(2)
             pdf.set_fill_color(240, 240, 240)
             pdf.set_font("Arial", 'B', 10)
-            pdf.cell(60, 10, "  Original Room:", border='B', fill=True)
+            pdf.cell(60, 10, "   Original Room:", border='B', fill=True)
             pdf.set_font("Arial", '', 10)
-            pdf.cell(130, 10, f"  {cat_orig}", border='B', ln=True)
+            pdf.cell(130, 10, f"   {cat_orig}", border='B', ln=True)
             
             pdf.set_fill_color(230, 240, 255) 
             pdf.set_font("Arial", 'B', 10)
-            pdf.cell(60, 12, "  UPGRADED TO:", border='B', fill=True)
+            pdf.cell(60, 12, "   UPGRADED TO:", border='B', fill=True)
             pdf.set_font("Arial", 'B', 11)
-            pdf.cell(130, 12, f"  {cat_dest}", border='B', ln=True)
+            pdf.cell(130, 12, f"   {cat_dest}", border='B', ln=True)
             pdf.ln(5)
 
             # Desglose de Costos
@@ -190,11 +190,15 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             
             pdf.ln(15)
             pdf.set_font("Arial", 'I', 9)
-            pdf.multi_cell(0, 5, "Terms: "Terms: This upgrade is non-refundable and applies for the entire stay. "
-    "In the event of an early departure, no refund will be issued for the upsell.\n"
-    "Este upgrade no es reembolsable y aplica por la estancia completa. "
-    "En caso de salida anticipada, no aplicará ningún reembolso por el upsell."
-)
+            
+            # --- TEXTO DE TÉRMINOS CORREGIDO ---
+            terminos_texto = (
+                "Terms: This upgrade is non-refundable and applies for the entire stay. "
+                "In the event of an early departure, no refund will be issued for the upsell.\n"
+                "Este upgrade no es reembolsable y aplica por la estancia completa. "
+                "En caso de salida anticipada, no aplicara ningun reembolso por el upsell."
+            )
+            pdf.multi_cell(0, 5, terminos_texto)
             
             pdf.ln(25)
             pdf.line(10, pdf.get_y(), 85, pdf.get_y())
