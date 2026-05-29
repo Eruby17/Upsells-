@@ -87,8 +87,8 @@ noches = (check_out - check_in).days
 diferenciales = {
     "Standard Two Double Beds": 0.0, "Junior Suite": 75.0, "Deluxe Suite": 0.0,
     "Executive Suite": 150.0, "One Bedroom Suite Garden": 225.0, "One Bedroom Suite": 300.0,
-    "1 Bedroom Suite Plus": 375.0, "1 Bedroom Ocean Front": 425.0, "2 Bedroom Suite": 780.0,
-    "2 Bedroom Ocean Front": 830.0, "Penthouse 1PH": 1125.0,
+    "1 Bedroom Suite Plus": 375.0, "1 Bedroom Ocean Front": 475.0, "2 Bedroom Suite": 780.0,
+    "2 Bedroom Ocean Front": 980.0, "Penthouse 1PH": 1125.0,
     "Penthouse 2PH": 1875.0, "Penthouse 3PH": 2625.0
 }
 
