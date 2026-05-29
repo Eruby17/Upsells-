@@ -211,4 +211,4 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             pdf_output = pdf.output(dest='S').encode('latin-1', errors='replace')
             if os.path.exists(logo_path): os.remove(logo_path)
 
-            st.download_button("📥 Descargar Acuerdo PDF", pdf_output, f"Upsell_{n_reserva}.pdf", "application/pdf", use_container_width=True)
+            st.download_button("📥 Descargar PDF", pdf_output, f"Upsell_{n_reserva}.pdf", "application/pdf", use_container_width=True)
