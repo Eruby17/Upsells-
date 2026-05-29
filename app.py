@@ -87,7 +87,8 @@ noches = (check_out - check_in).days
 diferenciales = {
     "Standard Two Double Beds": 0.0, "Junior Suite": 75.0, "Deluxe Suite": 0.0,
     "Executive Suite": 150.0, "One Bedroom Suite Garden": 225.0, "One Bedroom Suite": 300.0,
-    "1 Bedroom Suite Plus": 375.0,"1 Bedroom Ocean Front": 425.0, "2 Bedroom Suite": 780.0,"2 Bedroom Ocean Front": 830.0, "Penthouse 1PH": 1125.0,
+    "1 Bedroom Suite Plus": 375.0, "1 Bedroom Ocean Front": 425.0, "2 Bedroom Suite": 780.0,
+    "2 Bedroom Ocean Front": 830.0, "Penthouse 1PH": 1125.0,
     "Penthouse 2PH": 1875.0, "Penthouse 3PH": 2625.0
 }
 
@@ -98,22 +99,24 @@ with col_cat2: cat_dest = st.selectbox("Upgrade a Categoría", list(diferenciale
 st.divider()
 
 # --- 5. CÁLCULOS Y PDF ---
+# Inicializamos variables en el estado de la sesión para evitar que desaparezcan al descargar
+if "calculado" not in st.session_state:
+    st.session_state.calculado = False
+    st.session_state.pdf_output = None
+    st.session_state.precio_noche_usd = 0.0
+    st.session_state.total_usd = 0.0
+    st.session_state.total_mxn = 0.0
+
 if st.button("💰 Calcular Cotización", type="primary", use_container_width=True):
     if noches <= 0:
         st.error("La fecha de salida debe ser posterior a la de entrada.")
+        st.session_state.calculado = False
     else:
         with st.spinner("Calculando..."):
             gap = diferenciales[cat_dest] - diferenciales[cat_orig]
-            precio_noche_usd = (gap * (1 - desc_actual/100)) * 1.30
-            total_usd = precio_noche_usd * noches
-            total_mxn = total_usd * tc_actual
-
-            # Visualización en Streamlit
-            res1, res2, res3, res4 = st.columns(4)
-            res1.metric("Noches", f"{noches}")
-            res2.metric("USD / Noche", f"${precio_noche_usd:,.2f}")
-            res3.metric("Total USD", f"${total_usd:,.2f}")
-            res4.metric("Total MXN", f"${total_mxn:,.2f}")
+            st.session_state.precio_noche_usd = (gap * (1 - desc_actual/100)) * 1.30
+            st.session_state.total_usd = st.session_state.precio_noche_usd * noches
+            st.session_state.total_mxn = st.session_state.total_usd * tc_actual
 
             # --- GENERACIÓN DE PDF ---
             pdf = FPDF()
@@ -176,22 +179,21 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             # Desglose de Costos
             pdf.set_font("Arial", '', 11)
             pdf.cell(120, 10, f"Upgrade Fee per Night ({noches} nights):")
-            pdf.cell(70, 10, f"USD ${precio_noche_usd:,.2f}", align='R', ln=True)
+            pdf.cell(70, 10, f"USD ${st.session_state.precio_noche_usd:,.2f}", align='R', ln=True)
             
             pdf.set_font("Arial", 'B', 12)
             pdf.cell(120, 10, "Total Upgrade Fee (Including Taxes):", border='T')
             pdf.set_font("Arial", 'B', 14)
-            pdf.cell(70, 10, f"USD ${total_usd:,.2f}", border='T', align='R', ln=True)
+            pdf.cell(70, 10, f"USD ${st.session_state.total_usd:,.2f}", border='T', align='R', ln=True)
             
             pdf.set_font("Arial", 'I', 10)
             pdf.cell(120, 8, f"Exchange Rate / Tipo de Cambio (1 USD = {tc_actual} MXN):")
             pdf.set_font("Arial", 'B', 12)
-            pdf.cell(70, 8, f"MXN ${total_mxn:,.2f}", align='R', ln=True)
+            pdf.cell(70, 8, f"MXN ${st.session_state.total_mxn:,.2f}", align='R', ln=True)
             
             pdf.ln(15)
             pdf.set_font("Arial", 'I', 9)
             
-            # --- TEXTO DE TÉRMINOS CORREGIDO ---
             terminos_texto = (
                 "Terms: This upgrade is non-refundable and applies for the entire stay. "
                 "In the event of an early departure, no refund will be issued for the upsell.\n"
@@ -208,7 +210,22 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             pdf.set_x(125)
             pdf.cell(75, 10, "Front Office Representative", align='C')
 
-            pdf_output = pdf.output(dest='S').encode('latin-1', errors='replace')
+            st.session_state.pdf_output = pdf.output(dest='S').encode('latin-1', errors='replace')
             if os.path.exists(logo_path): os.remove(logo_path)
+            st.session_state.calculado = True
 
-            st.download_button("📥 Descargar PDF", pdf_output, f"Upsell_{n_reserva}.pdf", "application/pdf", use_container_width=True)
+# Muestra los resultados y el botón de descarga fuera del condicional del botón de cálculo
+if st.session_state.calculado:
+    res1, res2, res3, res4 = st.columns(4)
+    res1.metric("Noches", f"{noches}")
+    res2.metric("USD / Noche", f"${st.session_state.precio_noche_usd:,.2f}")
+    res3.metric("Total USD", f"${st.session_state.total_usd:,.2f}")
+    res4.metric("Total MXN", f"${st.session_state.total_mxn:,.2f}")
+
+    st.download_button(
+        "📥 Descargar PDF", 
+        st.session_state.pdf_output, 
+        f"Upsell_{n_reserva}.pdf", 
+        "application/pdf", 
+        use_container_width=True
+    )
