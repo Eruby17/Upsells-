@@ -96,6 +96,34 @@ col_cat1, col_cat2 = st.columns(2)
 with col_cat1: cat_orig = st.selectbox("Categoría Original", list(diferenciales.keys()))
 with col_cat2: cat_dest = st.selectbox("Upgrade a Categoría", list(diferenciales.keys()), index=1)
 
+# --- NUEVA SECCIÓN DE PRECIOS Y AJUSTES ---
+st.subheader("Ajuste de Tarifa Comercial")
+gap = diferenciales[cat_dest] - diferenciales[cat_orig]
+precio_minimo_calculado = (gap * (1 - desc_actual/100)) * 1.30
+
+col_tipo_precio, col_precio_final = st.columns(2)
+
+with col_tipo_precio:
+    tipo_precio = st.radio(
+        "Estrategia de Venta",
+        ["Aplicar Mínimo Sugerido", "Ingresar Precio Manual (Vender más caro)"],
+        horizontal=True
+    )
+
+with col_precio_final:
+    if tipo_precio == "Ingresar Precio Manual (Vender más caro)":
+        precio_venda_usd = st.number_input(
+            "Precio por Noche Final (USD)",
+            min_value=float(precio_minimo_calculado),
+            value=float(precio_minimo_calculado),
+            step=5.0,
+            format="%.2f",
+            help=f"No puede ser menor al precio mínimo calculado con descuento (${precio_minimo_calculado:,.2f} USD)"
+        )
+    else:
+        precio_venda_usd = precio_minimo_calculado
+        st.metric("Precio por Noche Fijado (USD)", f"${precio_venda_usd:,.2f}")
+
 st.divider()
 
 # --- 5. CÁLCULOS Y PDF ---
@@ -113,10 +141,10 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
         st.error("La fecha de salida debe ser posterior a la de entrada.")
         st.session_state.calculado = False
     else:
-        with st.spinner("Calculando..."):
-            gap = diferenciales[cat_dest] - diferenciales[cat_orig]
-            st.session_state.precio_noche_usd = (gap * (1 - desc_actual/100)) * 1.30
-            st.session_state.total_usd = st.session_state.precio_noche_usd * noches
+        with st.spinner("Generando documento..."):
+            # Fijamos los cálculos en base al precio seleccionado (Mínimo o Manual)
+            st.session_state.precio_noche_usd = precio_venda_usd
+            st.session_state.total_usd = precio_venda_usd * noches
             st.session_state.total_mxn = st.session_state.total_usd * tc_actual
             st.session_state.noches_guardadas = noches
             st.session_state.reserva_guardada = n_reserva if n_reserva else "Sin_Numero"
@@ -152,8 +180,8 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             pdf.set_text_color(0, 0, 0)
             pdf.set_font("Arial", '', 11)
             pdf.ln(2)
-            pdf.cell(95, 8, f"Guest: {cliente.upper()}")
-            pdf.cell(95, 8, f"Confirmation: {n_reserva}", ln=True)
+            pdf.cell(95, 8, f"Guest: {cliente.upper()}".encode('latin-1', 'replace').decode('latin-1'))
+            pdf.cell(95, 8, f"Confirmation: {n_reserva}".encode('latin-1', 'replace').decode('latin-1'), ln=True)
             pdf.cell(95, 8, f"Check-in: {check_in.strftime('%d %b, %Y')}")
             pdf.cell(95, 8, f"Check-out: {check_out.strftime('%d %b, %Y')}", ln=True)
             pdf.cell(95, 8, f"Number of Nights: {noches}", ln=True)
@@ -170,16 +198,16 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             pdf.set_font("Arial", 'B', 10)
             pdf.cell(60, 10, "   Original Room:", border='B', fill=True)
             pdf.set_font("Arial", '', 10)
-            pdf.cell(130, 10, f"   {cat_orig}", border='B', ln=True)
+            pdf.cell(130, 10, f"   {cat_orig}".encode('latin-1', 'replace').decode('latin-1'), border='B', ln=True)
             
             pdf.set_fill_color(230, 240, 255) 
             pdf.set_font("Arial", 'B', 10)
             pdf.cell(60, 12, "   UPGRADED TO:", border='B', fill=True)
             pdf.set_font("Arial", 'B', 11)
-            pdf.cell(130, 12, f"   {cat_dest}", border='B', ln=True)
+            pdf.cell(130, 12, f"   {cat_dest}".encode('latin-1', 'replace').decode('latin-1'), border='B', ln=True)
             pdf.ln(5)
 
-            # Desglose de Costos
+            # Desglose de Costos (Solo muestra el nuevo precio acordado)
             pdf.set_font("Arial", '', 11)
             pdf.cell(120, 10, f"Upgrade Fee per Night ({noches} nights):")
             pdf.cell(70, 10, f"USD ${st.session_state.precio_noche_usd:,.2f}", align='R', ln=True)
@@ -197,13 +225,14 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             pdf.ln(15)
             pdf.set_font("Arial", 'I', 9)
             
+            # Texto limpio sin caracteres especiales conflictivos para FPDF estándar
             terminos_texto = (
                 "Terms: This upgrade is non-refundable and applies for the entire stay. "
                 "In the event of an early departure, no refund will be issued for the upsell.\n"
                 "Este upgrade no es reembolsable y aplica por la estancia completa. "
                 "En caso de salida anticipada, no aplicara ningun reembolso por el upsell."
             )
-            pdf.multi_cell(0, 5, terminos_texto)
+            pdf.multi_cell(0, 5, terminos_texto.encode('latin-1', 'replace').decode('latin-1'))
             
             pdf.ln(25)
             pdf.line(10, pdf.get_y(), 85, pdf.get_y())
@@ -213,30 +242,24 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             pdf.set_x(125)
             pdf.cell(75, 10, "Front Office Representative", align='C')
 
-            # --- NUEVA EXTRACCIÓN SEGURA DE BYTES ---
-            # En fpdf2 moderno, output() sin argumentos devuelve los bytes del documento directamente.
-            # En fpdf viejo, devuelve un string que codificamos.
-            pdf_raw = pdf.output()
-            if isinstance(pdf_raw, str):
-                st.session_state.pdf_output = pdf_raw.encode('latin-1', errors='replace')
-            else:
-                st.session_state.pdf_output = bytes(pdf_raw)
+            # Extracción limpia y segura a memoria binaria
+            st.session_state.pdf_output = bytes(pdf.output(dest='S'))
 
             if os.path.exists(logo_path): os.remove(logo_path)
             st.session_state.calculado = True
 
-# Muestra los resultados fuera del condicional
+# Muestra los resultados y habilita la descarga
 if st.session_state.calculado:
     res1, res2, res3, res4 = st.columns(4)
     res1.metric("Noches", f"{st.session_state.noches_guardadas}")
-    res2.metric("USD / Noche", f"${st.session_state.precio_noche_usd:,.2f}")
+    res2.metric("USD / Noche (Final)", f"${st.session_state.precio_noche_usd:,.2f}")
     res3.metric("Total USD", f"${st.session_state.total_usd:,.2f}")
     res4.metric("Total MXN", f"${st.session_state.total_mxn:,.2f}")
 
     st.download_button(
         "📥 Descargar PDF", 
-        st.session_state.pdf_output, 
-        f"Upsell_{st.session_state.reserva_guardada}.pdf", 
-        "application/pdf", 
+        data=st.session_state.pdf_output, 
+        file_name=f"Upsell_{st.session_state.reserva_guardada}.pdf", 
+        mime="application/pdf", 
         use_container_width=True
     )
