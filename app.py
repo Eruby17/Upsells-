@@ -99,13 +99,14 @@ with col_cat2: cat_dest = st.selectbox("Upgrade a Categoría", list(diferenciale
 st.divider()
 
 # --- 5. CÁLCULOS Y PDF ---
-# Inicializamos variables en el estado de la sesión para evitar que desaparezcan al descargar
 if "calculado" not in st.session_state:
     st.session_state.calculado = False
     st.session_state.pdf_output = None
     st.session_state.precio_noche_usd = 0.0
     st.session_state.total_usd = 0.0
     st.session_state.total_mxn = 0.0
+    st.session_state.noches_guardadas = 0
+    st.session_state.reserva_guardada = ""
 
 if st.button("💰 Calcular Cotización", type="primary", use_container_width=True):
     if noches <= 0:
@@ -117,6 +118,8 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             st.session_state.precio_noche_usd = (gap * (1 - desc_actual/100)) * 1.30
             st.session_state.total_usd = st.session_state.precio_noche_usd * noches
             st.session_state.total_mxn = st.session_state.total_usd * tc_actual
+            st.session_state.noches_guardadas = noches
+            st.session_state.reserva_guardada = n_reserva if n_reserva else "Sin_Numero"
 
             # --- GENERACIÓN DE PDF ---
             pdf = FPDF()
@@ -210,14 +213,21 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             pdf.set_x(125)
             pdf.cell(75, 10, "Front Office Representative", align='C')
 
-            st.session_state.pdf_output = pdf.output(dest='S').encode('latin-1', errors='replace')
+            # --- CORRECCIÓN DE SALIDA DE FPDF ---
+            # Guardamos la salida directamente; si devuelve string lo codificamos, si devuelve bytes pasa limpio.
+            pdf_raw = pdf.output(dest='S')
+            if isinstance(pdf_raw, str):
+                st.session_state.pdf_output = pdf_raw.encode('latin-1', errors='replace')
+            else:
+                st.session_state.pdf_output = pdf_raw
+
             if os.path.exists(logo_path): os.remove(logo_path)
             st.session_state.calculado = True
 
-# Muestra los resultados y el botón de descarga fuera del condicional del botón de cálculo
+# Muestra los resultados fuera del condicional para evitar que desaparezcan
 if st.session_state.calculado:
     res1, res2, res3, res4 = st.columns(4)
-    res1.metric("Noches", f"{noches}")
+    res1.metric("Noches", f"{st.session_state.noches_guardadas}")
     res2.metric("USD / Noche", f"${st.session_state.precio_noche_usd:,.2f}")
     res3.metric("Total USD", f"${st.session_state.total_usd:,.2f}")
     res4.metric("Total MXN", f"${st.session_state.total_mxn:,.2f}")
@@ -225,7 +235,7 @@ if st.session_state.calculado:
     st.download_button(
         "📥 Descargar PDF", 
         st.session_state.pdf_output, 
-        f"Upsell_{n_reserva}.pdf", 
+        f"Upsell_{st.session_state.reserva_guardada}.pdf", 
         "application/pdf", 
         use_container_width=True
     )
