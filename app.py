@@ -96,7 +96,7 @@ col_cat1, col_cat2 = st.columns(2)
 with col_cat1: cat_orig = st.selectbox("Categoría Original", list(diferenciales.keys()))
 with col_cat2: cat_dest = st.selectbox("Upgrade a Categoría", list(diferenciales.keys()), index=1)
 
-# --- NUEVA SECCIÓN DE PRECIOS Y AJUSTES ---
+# --- SECCIÓN DE PRECIOS Y AJUSTES ---
 st.subheader("Ajuste de Tarifa Comercial")
 gap = diferenciales[cat_dest] - diferenciales[cat_orig]
 precio_minimo_calculado = (gap * (1 - desc_actual/100)) * 1.30
@@ -137,12 +137,11 @@ if "calculado" not in st.session_state:
     st.session_state.reserva_guardada = ""
 
 if st.button("💰 Calcular Cotización", type="primary", use_container_width=True):
-    if noches <= 0:
+    if面 noches <= 0:
         st.error("La fecha de salida debe ser posterior a la de entrada.")
         st.session_state.calculado = False
     else:
         with st.spinner("Generando documento..."):
-            # Fijamos los cálculos en base al precio seleccionado (Mínimo o Manual)
             st.session_state.precio_noche_usd = precio_venda_usd
             st.session_state.total_usd = precio_venda_usd * noches
             st.session_state.total_mxn = st.session_state.total_usd * tc_actual
@@ -207,7 +206,7 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             pdf.cell(130, 12, f"   {cat_dest}".encode('latin-1', 'replace').decode('latin-1'), border='B', ln=True)
             pdf.ln(5)
 
-            # Desglose de Costos (Solo muestra el nuevo precio acordado)
+            # Desglose de Costos (Solo el precio final acordado)
             pdf.set_font("Arial", '', 11)
             pdf.cell(120, 10, f"Upgrade Fee per Night ({noches} nights):")
             pdf.cell(70, 10, f"USD ${st.session_state.precio_noche_usd:,.2f}", align='R', ln=True)
@@ -225,7 +224,6 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             pdf.ln(15)
             pdf.set_font("Arial", 'I', 9)
             
-            # Texto limpio sin caracteres especiales conflictivos para FPDF estándar
             terminos_texto = (
                 "Terms: This upgrade is non-refundable and applies for the entire stay. "
                 "In the event of an early departure, no refund will be issued for the upsell.\n"
@@ -242,13 +240,15 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             pdf.set_x(125)
             pdf.cell(75, 10, "Front Office Representative", align='C')
 
-            # Extracción limpia y segura a memoria binaria
-            st.session_state.pdf_output = bytes(pdf.output(dest='S'))
+            # --- EXTRACCIÓN MODERNA SEGURA COMPATIBLE CON FPDF2 ---
+            pdf_bytes = pdf.output()
+            # Si la versión devuelve string (fpdf viejo), pasamos a bytes. Si es fpdf2, ya es bytes.
+            st.session_state.pdf_output = pdf_bytes if isinstance(pdf_bytes, bytes) else bytes(pdf_bytes, 'latin-1')
 
             if os.path.exists(logo_path): os.remove(logo_path)
             st.session_state.calculado = True
 
-# Muestra los resultados y habilita la descarga
+# Muestra los resultados y descarga de manera persistente
 if st.session_state.calculado:
     res1, res2, res3, res4 = st.columns(4)
     res1.metric("Noches", f"{st.session_state.noches_guardadas}")
