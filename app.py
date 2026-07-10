@@ -137,7 +137,7 @@ if "calculado" not in st.session_state:
     st.session_state.reserva_guardada = ""
 
 if st.button("💰 Calcular Cotización", type="primary", use_container_width=True):
-    if面 noches <= 0:
+    if noches <= 0:
         st.error("La fecha de salida debe ser posterior a la de entrada.")
         st.session_state.calculado = False
     else:
@@ -240,10 +240,10 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             pdf.set_x(125)
             pdf.cell(75, 10, "Front Office Representative", align='C')
 
-            # --- EXTRACCIÓN MODERNA SEGURA COMPATIBLE CON FPDF2 ---
-            pdf_bytes = pdf.output()
-            # Si la versión devuelve string (fpdf viejo), pasamos a bytes. Si es fpdf2, ya es bytes.
-            st.session_state.pdf_output = pdf_bytes if isinstance(pdf_bytes, bytes) else bytes(pdf_bytes, 'latin-1')
+            # --- CORRECCIÓN FINAL PARA FPDF2 ---
+            # output() sin argumentos retorna bytes directamente.
+            pdf_result = pdf.output()
+            st.session_state.pdf_output = pdf_result if isinstance(pdf_result, bytes) else bytes(pdf_result, 'latin-1')
 
             if os.path.exists(logo_path): os.remove(logo_path)
             st.session_state.calculado = True
