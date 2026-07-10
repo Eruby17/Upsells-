@@ -213,18 +213,19 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             pdf.set_x(125)
             pdf.cell(75, 10, "Front Office Representative", align='C')
 
-            # --- CORRECCIÓN DE SALIDA DE FPDF ---
-            # Guardamos la salida directamente; si devuelve string lo codificamos, si devuelve bytes pasa limpio.
-            pdf_raw = pdf.output(dest='S')
+            # --- NUEVA EXTRACCIÓN SEGURA DE BYTES ---
+            # En fpdf2 moderno, output() sin argumentos devuelve los bytes del documento directamente.
+            # En fpdf viejo, devuelve un string que codificamos.
+            pdf_raw = pdf.output()
             if isinstance(pdf_raw, str):
                 st.session_state.pdf_output = pdf_raw.encode('latin-1', errors='replace')
             else:
-                st.session_state.pdf_output = pdf_raw
+                st.session_state.pdf_output = bytes(pdf_raw)
 
             if os.path.exists(logo_path): os.remove(logo_path)
             st.session_state.calculado = True
 
-# Muestra los resultados fuera del condicional para evitar que desaparezcan
+# Muestra los resultados fuera del condicional
 if st.session_state.calculado:
     res1, res2, res3, res4 = st.columns(4)
     res1.metric("Noches", f"{st.session_state.noches_guardadas}")
