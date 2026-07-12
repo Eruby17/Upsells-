@@ -4,7 +4,6 @@ from datetime import datetime, timedelta
 import pandas as pd
 import requests
 import io
-import os
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Cotizador de upsells - Casa Dorada", page_icon="🏨", layout="wide")
@@ -55,7 +54,7 @@ def procesar_config():
             
     return desc_base, tc_base
 
-# Lectura de la configuración base
+# Lectura segura de configuraciones básicas
 try:
     desc_actual, tc_desde_drive = procesar_config()
 except Exception:
@@ -65,7 +64,8 @@ except Exception:
 # --- 3. PANEL LATERAL (SIDEBAR) ---
 with st.sidebar:
     try:
-        st.image(LOGO_URL, use_container_width=True)
+        # Se actualiza a width='stretch' para cumplir con las advertencias de tus logs
+        st.image(LOGO_URL, width='stretch')
     except Exception:
         st.subheader("Casa Dorada Los Cabos")
         
@@ -81,7 +81,7 @@ with st.sidebar:
     )
     
     st.divider()
-    if st.button("🔄 Sincronizar Drive", use_container_width=True):
+    if st.button("🔄 Sincronizar Drive", width='stretch'):
         st.cache_data.clear()
         st.rerun()
 
@@ -101,7 +101,7 @@ if check_out and check_in:
 else:
     noches = 1
 
-# Listado original de valores de referencia fijos por categoría
+# Tabla original estricta de diferencias del hotel
 valores_habitaciones = {
     "Standard Two Double Beds": 0.0,
     "Junior Suite": 75.0,
@@ -124,148 +124,123 @@ with col_cat2: cat_dest = st.selectbox("Upgrade a Categoría", list(valores_habi
 
 st.divider()
 
-# --- 5. INICIALIZACIÓN DE SESIÓN ---
-if "calc_ok" not in st.session_state:
-    st.session_state.calc_ok = False
-    st.session_state.p_noche = 0.0
-    st.session_state.t_usd = 0.0
-    st.session_state.t_mxn = 0.0
-    st.session_state.n_noches = 0
-    st.session_state.c_reserva = ""
+# --- 5. LÓGICA DE PROCESAMIENTO Y ENCAPSULAMIENTO EN MEMORIA ---
+gap_fijo = valores_habitaciones.get(cat_dest, 0.0) - valores_habitaciones.get(cat_orig, 0.0)
+p_noche = (gap_fijo * (1 - desc_actual/100)) * 1.30
+t_usd = p_noche * noches
+t_mxn = t_usd * tc_actual
+c_reserva = n_reserva if n_reserva.strip() else "Sin_Numero"
 
-if st.button("💰 Calcular Cotización", type="primary", use_container_width=True):
-    if noches <= 0:
-        st.error("La fecha de salida debe ser posterior a la de entrada.")
-        st.session_state.calc_ok = False
-    else:
-        # Matemática fija original
-        gap_fijo = valores_habitaciones.get(cat_dest, 0.0) - valores_habitaciones.get(cat_orig, 0.0)
-        
-        st.session_state.p_noche = (gap_fijo * (1 - desc_actual/100)) * 1.30
-        st.session_state.t_usd = st.session_state.p_noche * noches
-        st.session_state.t_mxn = st.session_state.t_usd * tc_actual
-        st.session_state.n_noches = noches
-        st.session_state.c_reserva = n_reserva if n_reserva.strip() else "Sin_Numero"
-        st.session_state.calc_ok = True
+# Mostramos las métricas numéricas directamente
+res1, res2, res3, res4 = st.columns(4)
+res1.metric("Noches", f"{noches}")
+res2.metric("USD / Noche", f"${p_noche:,.2f}")
+res3.metric("Total USD", f"${t_usd:,.2f}")
+res4.metric("Total MXN", f"${t_mxn:,.2f}")
 
-# --- 6. MUESTRA DE RESULTADOS Y DESCARGA NATIVA AL INSTANTE ---
-if st.session_state.calc_ok:
-    res1, res2, res3, res4 = st.columns(4)
-    res1.metric("Noches", f"{st.session_state.n_noches}")
-    res2.metric("USD / Noche", f"${st.session_state.p_noche:,.2f}")
-    st.session_state.t_usd = st.session_state.p_noche * st.session_state.n_noches
-    st.session_state.t_mxn = st.session_state.t_usd * tc_actual
-    res3.metric("Total USD", f"${st.session_state.t_usd:,.2f}")
-    res4.metric("Total MXN", f"${st.session_state.t_mxn:,.2f}")
-
+# --- 6. FUNCIÓN BLINDADA GENERADORA DE BYTES PDF (INMUNE A FALLAS DE SERVIDOR) ---
+def generar_pdf_seguro():
+    pdf = FPDF()
+    pdf.add_page()
+    
+    # Intento de cargar logo de Casa Dorada
     try:
-        # Construcción directa del reporte en el momento exacto de la descarga
-        pdf = FPDF()
-        pdf.add_page()
-        
-        logo_path = "temp_logo.png"
-        try:
-            r = requests.get(LOGO_URL, timeout=5)
-            if r.status_code == 200:
-                with open(logo_path, "wb") as f:
-                    f.write(r.content)
-                pdf.image(logo_path, 10, 10, 50) 
-        except Exception:
-            pdf.set_font("Arial", 'B', 12)
-            pdf.cell(0, 10, "CASA DORADA LOS CABOS", ln=True)
+        r = requests.get(LOGO_URL, timeout=4)
+        if r.status_code == 200:
+            img_buf = io.BytesIO(r.content)
+            # fpdf2 acepta flujos de bytes nativos directamente sin guardar en disco
+            pdf.image(img_buf, x=10, y=10, w=50)
+    except Exception:
+        pdf.set_font("Helvetica", 'B', 12)
+        pdf.cell(0, 10, "CASA DORADA LOS CABOS", ln=True)
 
-        pdf.ln(30)
-        pdf.set_font("Arial", 'B', 16)
-        pdf.cell(0, 10, "ROOM UPGRADE AGREEMENT", ln=True, align='R')
-        pdf.set_font("Arial", '', 10)
-        pdf.cell(0, 5, f"Date: {datetime.now().strftime('%d/%m/%Y')}", ln=True, align='R')
-        pdf.ln(10)
+    pdf.ln(30)
+    pdf.set_font("Helvetica", 'B', 16)
+    pdf.cell(0, 10, "ROOM UPGRADE AGREEMENT", ln=True, align='R')
+    pdf.set_font("Helvetica", '', 10)
+    pdf.cell(0, 5, f"Date: {datetime.now().strftime('%d/%m/%Y')}", ln=True, align='R')
+    pdf.ln(10)
 
-        # Información del Huésped
-        pdf.set_fill_color(30, 55, 110) 
-        pdf.set_text_color(255, 255, 255)
-        pdf.set_font("Arial", 'B', 11)
-        pdf.cell(0, 8, "   GUEST INFORMATION", ln=True, fill=True)
-        
-        pdf.set_text_color(0, 0, 0)
-        pdf.set_font("Arial", '', 11)
-        pdf.ln(2)
-        
-        g_name = cliente.upper() if cliente else "VALUED GUEST"
-        pdf.cell(95, 8, f"Guest: {g_name}".encode('latin-1', 'replace').decode('latin-1'))
-        pdf.cell(95, 8, f"Confirmation: {st.session_state.c_reserva}".encode('latin-1', 'replace').decode('latin-1'), ln=True)
-        pdf.cell(95, 8, f"Check-in: {check_in.strftime('%d %b, %Y')}")
-        pdf.cell(95, 8, f"Check-out: {check_out.strftime('%d %b, %Y')}", ln=True)
-        pdf.cell(95, 8, f"Number of Nights: {st.session_state.n_noches}", ln=True)
-        pdf.ln(5)
+    # Bloque de Información del Huésped
+    pdf.set_fill_color(30, 55, 110) 
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", 'B', 11)
+    pdf.cell(0, 8, "   GUEST INFORMATION", ln=True, fill=True)
+    
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Helvetica", '', 11)
+    pdf.ln(2)
+    
+    g_name = cliente.upper() if cliente else "VALUED GUEST"
+    pdf.cell(95, 8, f"Guest: {g_name}".encode('latin-1', 'replace').decode('latin-1'))
+    pdf.cell(95, 8, f"Confirmation: {c_reserva}".encode('latin-1', 'replace').decode('latin-1'), ln=True)
+    pdf.cell(95, 8, f"Check-in: {check_in.strftime('%d %b, %Y')}")
+    pdf.cell(95, 8, f"Check-out: {check_out.strftime('%d %b, %Y')}", ln=True)
+    pdf.cell(95, 8, f"Number of Nights: {noches}", ln=True)
+    pdf.ln(5)
 
-        # Detalles del Upgrade
-        pdf.set_text_color(255, 255, 255)
-        pdf.set_font("Arial", 'B', 11)
-        pdf.cell(0, 8, "   ROOM UPGRADE DETAILS", ln=True, fill=True)
-        
-        pdf.set_text_color(0, 0, 0)
-        pdf.ln(2)
-        pdf.set_fill_color(240, 240, 240)
-        pdf.set_font("Arial", 'B', 10)
-        pdf.cell(60, 10, "   Original Room:", border='B', fill=True)
-        pdf.set_font("Arial", '', 10)
-        pdf.cell(130, 10, f"   {cat_orig}".encode('latin-1', 'replace').decode('latin-1'), border='B', ln=True)
-        
-        pdf.set_fill_color(230, 240, 255) 
-        pdf.set_font("Arial", 'B', 10)
-        pdf.cell(60, 12, "   UPGRADED TO:", border='B', fill=True)
-        pdf.set_font("Arial", 'B', 11)
-        pdf.cell(130, 12, f"   {cat_dest}".encode('latin-1', 'replace').decode('latin-1'), border='B', ln=True)
-        pdf.ln(5)
+    # Bloque de Detalles del Upgrade
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Helvetica", 'B', 11)
+    pdf.cell(0, 8, "   ROOM UPGRADE DETAILS", ln=True, fill=True)
+    
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(2)
+    pdf.set_fill_color(240, 240, 240)
+    pdf.set_font("Helvetica", 'B', 10)
+    pdf.cell(60, 10, "   Original Room:", border='B', fill=True)
+    pdf.set_font("Helvetica", '', 10)
+    pdf.cell(130, 10, f"   {cat_orig}".encode('latin-1', 'replace').decode('latin-1'), border='B', ln=True)
+    
+    pdf.set_fill_color(230, 240, 255) 
+    pdf.set_font("Helvetica", 'B', 10)
+    pdf.cell(60, 12, "   UPGRADED TO:", border='B', fill=True)
+    pdf.set_font("Helvetica", 'B', 11)
+    pdf.cell(130, 12, f"   {cat_dest}".encode('latin-1', 'replace').decode('latin-1'), border='B', ln=True)
+    pdf.ln(5)
 
-        # Desglose de Costos final
-        pdf.set_font("Arial", '', 11)
-        pdf.cell(120, 10, f"Upgrade Fee per Night ({st.session_state.n_noches} nights):")
-        pdf.cell(70, 10, f"USD ${st.session_state.p_noche:,.2f}", align='R', ln=True)
-        
-        pdf.set_font("Arial", 'B', 12)
-        pdf.cell(120, 10, "Total Upgrade Fee (Including Taxes):", border='T')
-        pdf.set_font("Arial", 'B', 14)
-        pdf.cell(70, 10, f"USD ${st.session_state.t_usd:,.2f}", border='T', align='R', ln=True)
-        
-        pdf.set_font("Arial", 'I', 10)
-        pdf.cell(120, 8, f"Exchange Rate / Tipo de Cambio (1 USD = {tc_actual} MXN):")
-        pdf.set_font("Arial", 'B', 12)
-        pdf.cell(70, 8, f"MXN ${st.session_state.t_mxn:,.2f}", align='R', ln=True)
-        
-        pdf.ln(15)
-        pdf.set_font("Arial", 'I', 9)
-        
-        terminos_texto = (
-            "Terms: This upgrade is non-refundable and applies for the entire stay. "
-            "In the event of an early departure, no refund will be issued for the upsell.\n"
-            "Este upgrade no es reembolsable y aplica por la estancia completa. "
-            "En caso de salida anticipada, no aplicara ningun reembolso por el upsell."
-        )
-        pdf.multi_cell(0, 5, terminos_texto.encode('latin-1', 'replace').decode('latin-1'))
-        
-        pdf.ln(25)
-        pdf.line(10, pdf.get_y(), 85, pdf.get_y())
-        pdf.line(125, pdf.get_y(), 200, pdf.get_y())
-        pdf.set_font("Arial", '', 10)
-        pdf.cell(75, 10, "Guest Signature", align='C')
-        pdf.set_x(125)
-        pdf.cell(75, 10, "Front Office Representative", align='C')
+    # Costos finales
+    pdf.set_font("Helvetica", '', 11)
+    pdf.cell(120, 10, f"Upgrade Fee per Night ({noches} nights):")
+    pdf.cell(70, 10, f"USD ${p_noche:,.2f}", align='R', ln=True)
+    
+    pdf.set_font("Helvetica", 'B', 12)
+    pdf.cell(120, 10, "Total Upgrade Fee (Including Taxes):", border='T')
+    pdf.set_font("Helvetica", 'B', 14)
+    pdf.cell(70, 10, f"USD ${t_usd:,.2f}", border='T', align='R', ln=True)
+    
+    pdf.set_font("Helvetica", 'I', 10)
+    pdf.cell(120, 8, f"Exchange Rate / Tipo de Cambio (1 USD = {tc_actual} MXN):")
+    pdf.set_font("Helvetica", 'B', 12)
+    pdf.cell(70, 8, f"MXN ${t_mxn:,.2f}", align='R', ln=True)
+    
+    pdf.ln(15)
+    pdf.set_font("Helvetica", 'I', 9)
+    
+    terminos_texto = (
+        "Terms: This upgrade is non-refundable and applies for the entire stay. "
+        "In the event of an early departure, no refund will be issued for the upsell.\n"
+        "Este upgrade no es reembolsable y aplica por la estancia completa. "
+        "En caso de salida anticipada, no aplicara ningun reembolso por el upsell."
+    )
+    pdf.multi_cell(0, 5, terminos_texto.encode('latin-1', 'replace').decode('latin-1'))
+    
+    pdf.ln(25)
+    pdf.line(10, pdf.get_y(), 85, pdf.get_y())
+    pdf.line(125, pdf.get_y(), 200, pdf.get_y())
+    pdf.set_font("Helvetica", '', 10)
+    pdf.cell(75, 10, "Guest Signature", align='C')
+    pdf.set_x(125)
+    pdf.cell(75, 10, "Front Office Representative", align='C')
 
-        # Exportación ultra segura directa al botón de descarga sin variables intermedias
-        pdf_final_output = pdf.output()
-        
-        st.download_button(
-            label="📥 Descargar PDF de Upgrade", 
-            data=bytes(pdf_final_output), 
-            file_name=f"Upsell_{st.session_state.c_reserva}.pdf", 
-            mime="application/pdf", 
-            use_container_width=True
-        )
-        
-        if os.path.exists(logo_path):
-            os.remove(logo_path)
+    # Retornamos los bytes nativos listos para Streamlit de forma directa
+    return pdf.output()
 
-    except Exception as e:
-        st.error(f"Error de renderizado de documento: {str(e)}")
+# --- 7. BOTÓN DE DESCARGA INSTANTÁNEO CON EXPORTACIÓN SEGURA ---
+st.download_button(
+    label="📥 Descargar PDF de Upgrade", 
+    data=generar_pdf_seguro(), 
+    file_name=f"Upsell_{c_reserva}.pdf", 
+    mime="application/pdf", 
+    width='stretch'
+)
