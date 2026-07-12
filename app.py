@@ -127,7 +127,7 @@ st.divider()
 # --- 5. INICIALIZACIÓN DE SESIÓN ---
 if "calc_ok" not in st.session_state:
     st.session_state.calc_ok = False
-    st.session_state.pdf_data = None
+    st.session_state.pdf_bytes = None
     st.session_state.p_noche = 0.0
     st.session_state.t_usd = 0.0
     st.session_state.t_mxn = 0.0
@@ -139,7 +139,7 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
         st.error("La fecha de salida debe ser posterior a la de entrada.")
         st.session_state.calc_ok = False
     else:
-        # Matemática original fija e inquebrantable
+        # Matemática fija e inquebrantable original
         gap_fijo = valores_habitaciones.get(cat_dest, 0.0) - valores_habitaciones.get(cat_orig, 0.0)
         
         st.session_state.p_noche = (gap_fijo * (1 - desc_actual/100)) * 1.30
@@ -243,12 +243,8 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             pdf.set_x(125)
             pdf.cell(75, 10, "Front Office Representative", align='C')
 
-            pdf_output_raw = pdf.output(dest='S')
-            if isinstance(pdf_output_raw, bytes):
-                st.session_state.pdf_data = pdf_output_raw
-            else:
-                st.session_state.pdf_data = bytes(pdf_output_raw, 'latin-1')
-
+            # MÉTODO CORREGIDO ANTI-CRASH: Forzamos la exportación segura mediante buffer de bytes nativos
+            st.session_state.pdf_bytes = bytes(pdf.output(dest='S'), 'latin-1') if isinstance(pdf.output(dest='S'), str) else pdf.output(dest='S')
             st.session_state.calc_ok = True
             
             if os.path.exists(logo_path):
@@ -259,7 +255,7 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             st.session_state.calc_ok = False
 
 # --- 6. MUESTRA DE RESULTADOS Y DESCARGA ---
-if st.session_state.calc_ok and st.session_state.pdf_data is not None:
+if st.session_state.calc_ok and st.session_state.pdf_bytes is not None:
     res1, res2, res3, res4 = st.columns(4)
     res1.metric("Noches", f"{st.session_state.n_noches}")
     res2.metric("USD / Noche", f"${st.session_state.p_noche:,.2f}")
@@ -268,7 +264,7 @@ if st.session_state.calc_ok and st.session_state.pdf_data is not None:
 
     st.download_button(
         label="📥 Descargar PDF de Upgrade", 
-        data=st.session_state.pdf_data, 
+        data=st.session_state.pdf_bytes, 
         file_name=f"Upsell_{st.session_state.c_reserva}.pdf", 
         mime="application/pdf", 
         use_container_width=True
