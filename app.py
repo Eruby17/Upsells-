@@ -12,7 +12,7 @@ st.set_page_config(page_title="Cotizador de upsells - Casa Dorada", page_icon="ð
 # --- 2. IDENTIFICADORES Y URLS ---
 SHEET_ID = "19hFs0Jgt58uWC_UXJ8_4aVCJVtX7fTBcHO7-iAVo1K0"
 GID_CONFIG = "481323566"
-GID_TARIFAS = "0"
+GID_TARIFAS = "481323566"
 LOGO_URL = "https://cdn2.paraty.es/casa-dorada/images/89eeeacd45ffd2e"
 
 @st.cache_data(ttl=600, show_spinner=False)
