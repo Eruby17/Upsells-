@@ -64,7 +64,6 @@ except Exception:
 # --- 3. PANEL LATERAL (SIDEBAR) ---
 with st.sidebar:
     try:
-        # Se actualiza a width='stretch' para cumplir con las advertencias de tus logs
         st.image(LOGO_URL, width='stretch')
     except Exception:
         st.subheader("Casa Dorada Los Cabos")
@@ -101,7 +100,7 @@ if check_out and check_in:
 else:
     noches = 1
 
-# Tabla original estricta de diferencias del hotel
+# Tabla original de valores de referencia fijos por categoría
 valores_habitaciones = {
     "Standard Two Double Beds": 0.0,
     "Junior Suite": 75.0,
@@ -124,7 +123,7 @@ with col_cat2: cat_dest = st.selectbox("Upgrade a Categoría", list(valores_habi
 
 st.divider()
 
-# --- 5. LÓGICA DE PROCESAMIENTO Y ENCAPSULAMIENTO EN MEMORIA ---
+# --- 5. LÓGICA DE PROCESAMIENTO ---
 gap_fijo = valores_habitaciones.get(cat_dest, 0.0) - valores_habitaciones.get(cat_orig, 0.0)
 p_noche = (gap_fijo * (1 - desc_actual/100)) * 1.30
 t_usd = p_noche * noches
@@ -138,17 +137,16 @@ res2.metric("USD / Noche", f"${p_noche:,.2f}")
 res3.metric("Total USD", f"${t_usd:,.2f}")
 res4.metric("Total MXN", f"${t_mxn:,.2f}")
 
-# --- 6. FUNCIÓN BLINDADA GENERADORA DE BYTES PDF (INMUNE A FALLAS DE SERVIDOR) ---
+# --- 6. FUNCIÓN DE CONVERSIÓN COMPATIBLE CON STR_STREAMLIT ---
 def generar_pdf_seguro():
     pdf = FPDF()
     pdf.add_page()
     
-    # Intento de cargar logo de Casa Dorada
+    # Carga de logotipo
     try:
         r = requests.get(LOGO_URL, timeout=4)
         if r.status_code == 200:
             img_buf = io.BytesIO(r.content)
-            # fpdf2 acepta flujos de bytes nativos directamente sin guardar en disco
             pdf.image(img_buf, x=10, y=10, w=50)
     except Exception:
         pdf.set_font("Helvetica", 'B', 12)
@@ -161,7 +159,7 @@ def generar_pdf_seguro():
     pdf.cell(0, 5, f"Date: {datetime.now().strftime('%d/%m/%Y')}", ln=True, align='R')
     pdf.ln(10)
 
-    # Bloque de Información del Huésped
+    # Información del Huésped
     pdf.set_fill_color(30, 55, 110) 
     pdf.set_text_color(255, 255, 255)
     pdf.set_font("Helvetica", 'B', 11)
@@ -179,7 +177,7 @@ def generar_pdf_seguro():
     pdf.cell(95, 8, f"Number of Nights: {noches}", ln=True)
     pdf.ln(5)
 
-    # Bloque de Detalles del Upgrade
+    # Detalles del Upgrade
     pdf.set_text_color(255, 255, 255)
     pdf.set_font("Helvetica", 'B', 11)
     pdf.cell(0, 8, "   ROOM UPGRADE DETAILS", ln=True, fill=True)
@@ -233,10 +231,10 @@ def generar_pdf_seguro():
     pdf.set_x(125)
     pdf.cell(75, 10, "Front Office Representative", align='C')
 
-    # Retornamos los bytes nativos listos para Streamlit de forma directa
-    return pdf.output()
+    # EL CAMBIO CLAVE: En fpdf2, forzamos la salida explícita como bytes independientes
+    return bytes(pdf.output())
 
-# --- 7. BOTÓN DE DESCARGA INSTANTÁNEO CON EXPORTACIÓN SEGURA ---
+# --- 7. BOTÓN DE DESCARGA INSTANTÁNEO ---
 st.download_button(
     label="📥 Descargar PDF de Upgrade", 
     data=generar_pdf_seguro(), 
