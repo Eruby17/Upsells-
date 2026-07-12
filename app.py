@@ -64,7 +64,7 @@ except Exception:
 # --- 3. PANEL LATERAL (SIDEBAR) ---
 with st.sidebar:
     try:
-        st.image(LOGO_URL, width='stretch')
+        st.image(LOGO_URL, width=200)
     except Exception:
         st.subheader("Casa Dorada Los Cabos")
         
@@ -80,7 +80,7 @@ with st.sidebar:
     )
     
     st.divider()
-    if st.button("🔄 Sincronizar Drive", width='stretch'):
+    if st.button("🔄 Sincronizar Drive"):
         st.cache_data.clear()
         st.rerun()
 
@@ -100,7 +100,7 @@ if check_out and check_in:
 else:
     noches = 1
 
-# Tabla original de valores de referencia fijos por categoría
+# Tabla original estricta de diferencias del hotel
 valores_habitaciones = {
     "Standard Two Double Beds": 0.0,
     "Junior Suite": 75.0,
@@ -137,7 +137,7 @@ res2.metric("USD / Noche", f"${p_noche:,.2f}")
 res3.metric("Total USD", f"${t_usd:,.2f}")
 res4.metric("Total MXN", f"${t_mxn:,.2f}")
 
-# --- 6. FUNCIÓN DE CONVERSIÓN COMPATIBLE CON STR_STREAMLIT ---
+# --- 6. FUNCIÓN DE CONVERSIÓN EN BYTES ESTRICTA ---
 def generar_pdf_seguro():
     pdf = FPDF()
     pdf.add_page()
@@ -231,14 +231,13 @@ def generar_pdf_seguro():
     pdf.set_x(125)
     pdf.cell(75, 10, "Front Office Representative", align='C')
 
-    # EL CAMBIO CLAVE: En fpdf2, forzamos la salida explícita como bytes independientes
+    # Forzamos la salida como un objeto binario inmutable puro 'bytes'
     return bytes(pdf.output())
 
-# --- 7. BOTÓN DE DESCARGA INSTANTÁNEO ---
+# --- 7. BOTÓN DE DESCARGA SEGURO ---
 st.download_button(
     label="📥 Descargar PDF de Upgrade", 
     data=generar_pdf_seguro(), 
     file_name=f"Upsell_{c_reserva}.pdf", 
-    mime="application/pdf", 
-    width='stretch'
+    mime="application/pdf"
 )
