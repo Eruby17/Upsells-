@@ -1,6 +1,6 @@
 import streamlit as st
 from fpdf import FPDF
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 import pandas as pd
 import requests
 import io
@@ -11,28 +11,24 @@ st.set_page_config(page_title="Cotizador de upsells - Casa Dorada", page_icon="�
 
 # --- 2. IDENTIFICADORES Y URLS ---
 SHEET_ID = "19hFs0Jgt58uWC_UXJ8_4aVCJVtX7fTBcHO7-iAVo1K0"
-GID_CONFIG = "481323566"
-GID_TARIFAS = "481323566"
 LOGO_URL = "https://cdn2.paraty.es/casa-dorada/images/89eeeacd45ffd2e"
 
 @st.cache_data(ttl=600, show_spinner=False)
 def obtener_datos_remotos():
     try:
-        url_c = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_CONFIG}"
-        url_t = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_TARIFAS}"
+        # Descargamos el libro completo en formato Excel nativo (.xlsx) para evitar problemas de GID=0
+        url_excel = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=xlsx"
         
         headers = {"User-Agent": "Mozilla/5.0"}
-        res_c = requests.get(url_c, headers=headers, timeout=7)
-        res_t = requests.get(url_t, headers=headers, timeout=7)
+        respuesta = requests.get(url_excel, headers=headers, timeout=10)
         
-        if res_c.status_code == 200 and res_t.status_code == 200:
-            contenido_c = res_c.content.decode('utf-8')
-            sep_c = ';' if ';' in contenido_c.split('\n')[0] else ','
-            df_c = pd.read_csv(io.StringIO(contenido_c), sep=sep_c)
+        if respuesta.status_code == 200:
+            excel_file = io.BytesIO(respuesta.content)
+            xl = pd.ExcelFile(excel_file)
             
-            contenido_t = res_t.content.decode('utf-8')
-            sep_t = ';' if ';' in contenido_t.split('\n')[0] else ','
-            df_t = pd.read_csv(io.StringIO(contenido_t), sep=sep_t)
+            # Forzamos la lectura de las hojas llamadas "1" y "2"
+            df_c = xl.parse("1") if "1" in xl.sheet_names else xl.parse(xl.sheet_names[0])
+            df_t = xl.parse("2") if "2" in xl.sheet_names else xl.parse(xl.sheet_names[1]) if len(xl.sheet_names) > 1 else xl.parse(xl.sheet_names[0])
             
             return df_c, df_t
         else:
@@ -48,7 +44,7 @@ def procesar_informacion():
     
     st.session_state['status_tarifas'] = "error" if df_2 is None else "ok"
 
-    # --- PROCESAR PESTAÑA CONFIGURACIÓN ---
+    # --- PROCESAR PESTAÑA CONFIGURACIÓN (HOJA 1) ---
     if df_1 is not None:
         try:
             df_1.columns = [str(c).strip().lower() for c in df_1.columns]
@@ -67,40 +63,32 @@ def procesar_informacion():
         except Exception:
             pass
 
-    # --- PROCESAR PESTAÑA TARIFAS (CRUCIAL PARA TEMPORADAS) ---
+    # --- PROCESAR PESTAÑA TARIFAS (HOJA 2 - DATE / RATE) ---
     if df_2 is not None:
         try:
-            df_2.columns = [str(c).strip().lower() for c in df_2.columns]
+            df_2.columns = [str(c).strip() for c in df_2.columns]
             
-            # Buscador flexible de columnas en la hoja de tarifas
-            col_fecha = [c for c in df_2.columns if 'date' in c or 'fecha' in c]
-            col_tarifa = [c for c in df_2.columns if 'rate' in c or 'tarifa' in c or 'precio' in c]
-            col_cat = [c for c in df_2.columns if 'category' in c or 'categoria' in c or 'hab' in c]
+            # Buscamos las columnas exactas por su nombre
+            col_fecha = [c for c in df_2.columns if c.lower() == 'date'][0]
+            col_tarifa = [c for c in df_2.columns if c.lower() == 'rate'][0]
             
-            if col_fecha and col_tarifa and col_cat:
-                c_f, c_t, c_c = col_fecha[0], col_tarifa[0], col_cat[0]
-                
-                # Conversión estricta de fechas al formato correcto de Python
-                df_2['fecha_limpia'] = pd.to_datetime(df_2[c_f], errors='coerce', dayfirst=True).dt.date
-                
-                # Limpieza de caracteres de moneda, espacios y comas decimales regionales
-                precios_limpios = df_2[c_t].astype(str).str.replace(' ', '').str.replace('$', '').str.replace('.', '', r=1).str.replace(',', '.')
-                df_2['tarifa_num'] = pd.to_numeric(precios_limpios, errors='coerce')
-                df_2['categoria_limpia'] = df_2[c_c].astype(str).str.strip()
-                
-                # Filtramos y nos quedamos con los registros completamente válidos
-                df_tarifas_limpias = df_2.dropna(subset=['fecha_limpia', 'tarifa_num']).copy()
-                
-                if df_tarifas_limpias.empty:
-                    st.session_state['status_tarifas'] = "error"
-            else:
+            # Convertimos las fechas de forma segura
+            df_2['fecha_limpia'] = pd.to_datetime(df_2[col_fecha], errors='coerce').dt.date
+            
+            # Limpiamos el factor numérico de la temporada (Rate) manejando comas decimales regionales
+            rate_limpio = df_2[col_tarifa].astype(str).str.replace(' ', '').str.replace('$', '').str.replace(',', '.').strip()
+            df_2['rate_num'] = pd.to_numeric(rate_limpio, errors='coerce')
+            
+            df_tarifas_limpias = df_2.dropna(subset=['fecha_limpia', 'rate_num']).copy()
+            
+            if df_tarifas_limpias.empty:
                 st.session_state['status_tarifas'] = "error"
         except Exception:
             st.session_state['status_tarifas'] = "error"
         
     return desc_base, tc_base, df_tarifas_limpias
 
-# Ejecución inicial de lectura
+# Ejecución segura de la lectura
 try:
     desc_actual, tc_desde_drive, df_tarifas = procesar_informacion()
 except Exception:
@@ -153,8 +141,8 @@ if check_out and check_in:
 else:
     noches = 1
 
-# Listado de diferencias fijas de respaldo (Fallback de emergencia)
-diferenciales_respaldo = {
+# Listado de diferencias fijas aprobadas por la dirección del hotel
+diferenciales = {
     "Standard Two Double Beds": 0.0, "Junior Suite": 75.0, "Deluxe Suite": 0.0,
     "Executive Suite": 150.0, "One Bedroom Suite Garden": 225.0, "One Bedroom Suite": 300.0,
     "1 Bedroom Suite Plus": 375.0, "1 Bedroom Ocean Front": 475.0, "2 Bedroom Suite": 780.0,
@@ -163,8 +151,8 @@ diferenciales_respaldo = {
 }
 
 col_cat1, col_cat2 = st.columns(2)
-with col_cat1: cat_orig = st.selectbox("Categoría Original", list(diferenciales_respaldo.keys()))
-with col_cat2: cat_dest = st.selectbox("Upgrade a Categoría", list(diferenciales_respaldo.keys()), index=1)
+with col_cat1: cat_orig = st.selectbox("Categoría Original", list(diferenciales.keys()))
+with col_cat2: cat_dest = st.selectbox("Upgrade a Categoría", list(diferenciales.keys()), index=1)
 
 st.divider()
 
@@ -184,37 +172,34 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
         st.session_state.calc_ok = False
     else:
         with st.spinner("Generando cotización por temporada..."):
-            total_gap_estancia = 0.0
+            total_factor_estancia = 0.0
             usando_precios_dinamicos = True
             
-            # Calculamos el gap noche por noche basándonos en el calendario del Drive
+            # Recorremos la estancia noche por noche acumulando el factor Rate del Drive
             for n in range(noches):
                 fecha_noche = check_in + timedelta(days=n)
                 
                 if not df_tarifas.empty:
-                    # Buscamos la tarifa de la habitación original para este día específico
-                    t_orig_fila = df_tarifas[(df_tarifas['fecha_limpia'] == fecha_noche) & (df_tarifas['categoria_limpia'] == cat_orig)]
-                    # Buscamos la tarifa de la habitación destino para este día específico
-                    t_dest_fila = df_tarifas[(df_tarifas['fecha_limpia'] == fecha_noche) & (df_tarifas['categoria_limpia'] == cat_dest)]
-                    
-                    if not t_orig_fila.empty and not t_dest_fila.empty:
-                        tarifa_o = t_orig_fila['tarifa_num'].values[0]
-                        tarifa_d = t_dest_fila['tarifa_num'].values[0]
-                        total_gap_estancia += (tarifa_d - tarifa_o)
+                    # Buscamos el factor Rate asignado a este día en específico
+                    fila_dia = df_tarifas[df_tarifas['fecha_limpia'] == fecha_noche]
+                    if not fila_dia.empty:
+                        total_factor_estancia += fila_dia['rate_num'].values[0]
                     else:
                         usando_precios_dinamicos = False
                 else:
                     usando_precios_dinamicos = False
             
-            # --- LÓGICA DE CONTROL Y PLAN DE RESPALDO (FALLBACK) ---
-            if usando_precios_dinamicos and total_gap_estancia > 0:
-                # El costo por noche promedio varía según la temporada real del Drive
-                st.session_state.p_noche = (total_gap_estancia / noches) * (1 - desc_actual/100) * 1.30
+            # --- MATEMÁTICA CON FLUCTUACIÓN EN BASE AL COMPORTAMIENTO ---
+            gap_base = diferenciales.get(cat_dest, 0.0) - diferenciales.get(cat_orig, 0.0)
+            
+            if usando_precios_dinamicos and total_factor_estancia > 0:
+                # El factor promedio de la temporada multiplica al diferencial fijo de la habitación
+                factor_promedio = total_factor_estancia / noches
+                st.session_state.p_noche = (gap_base * factor_promedio) * (1 - desc_actual/100) * 1.30
             else:
-                # Si las fechas no se cruzan o el Drive falló, usamos el diferencial plano de respaldo
-                st.warning("⚠️ Nota: Fechas de tarifas no localizadas en Drive para esta combinación. Se aplicó tarifa base de respaldo.")
-                gap_respaldo = diferenciales_respaldo.get(cat_dest, 0.0) - diferenciales_respaldo.get(cat_orig, 0.0)
-                st.session_state.p_noche = (gap_respaldo * (1 - desc_actual/100)) * 1.30
+                # Fallback seguro: Si la fecha no está en Drive, asume factor neutro (1.0) y muestra aviso
+                st.warning("⚠️ Nota: Fechas no localizadas en el calendario de la Hoja 2. Se aplicó tarifa base de respaldo.")
+                st.session_state.p_noche = (gap_base * (1 - desc_actual/100)) * 1.30
                 
             st.session_state.t_usd = st.session_state.p_noche * noches
             st.session_state.t_mxn = st.session_state.t_usd * tc_actual
