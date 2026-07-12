@@ -1,6 +1,6 @@
 import streamlit as st
 from fpdf import FPDF
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 import pandas as pd
 import requests
 import io
@@ -9,37 +9,36 @@ import os
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Cotizador de upsells - Casa Dorada", page_icon="🏨", layout="wide")
 
-# --- 2. IDENTIFICIDORES Y URLS ---
+# --- 2. IDENTIFICADORES Y URLS ---
 SHEET_ID = "19hFs0Jgt58uWC_UXJ8_4aVCJVtX7fTBcHO7-iAVo1K0"
 LOGO_URL = "https://cdn2.paraty.es/casa-dorada/images/89eeeacd45ffd2e"
 
 @st.cache_data(ttl=600, show_spinner=False)
 def obtener_datos_remotos():
     try:
-        # Descarga en formato Excel nativo usando el motor openpyxl
-        url_excel = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=xlsx"
+        # Usamos los enlaces nativos CSV por GID que Google procesa de forma directa e inmediata
+        url_c = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=481323566"
+        url_t = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid=0"
         
         headers = {"User-Agent": "Mozilla/5.0"}
-        respuesta = requests.get(url_excel, headers=headers, timeout=10)
+        res_c = requests.get(url_c, headers=headers, timeout=7)
+        res_t = requests.get(url_t, headers=headers, timeout=7)
         
-        if respuesta.status_code == 200:
-            excel_file = io.BytesIO(respuesta.content)
-            xl = pd.ExcelFile(excel_file, engine='openpyxl')
+        df_c, df_t = None, None
+        
+        if res_c.status_code == 200:
+            contenido_c = res_c.content.decode('utf-8')
+            sep_c = ';' if ';' in contenido_c.split('\n')[0] else ','
+            df_c = pd.read_csv(io.StringIO(contenido_c), sep=sep_c)
             
-            nombres_pestañas = xl.sheet_names
+        if res_t.status_code == 200:
+            contenido_t = res_t.content.decode('utf-8')
+            sep_t = ';' if ';' in contenido_t.split('\n')[0] else ','
+            df_t = pd.read_csv(io.StringIO(contenido_t), sep=sep_t)
             
-            # Posición 0 = Hoja 1 (Configuración) | Posición 1 = Hoja 2 (Tarifas)
-            name_config = nombres_pestañas[0]
-            name_tarifas = nombres_pestañas[1] if len(nombres_pestañas) > 1 else nombres_pestañas[0]
-            
-            df_c = xl.parse(name_config)
-            df_t = xl.parse(name_tarifas)
-            
-            return df_c, df_t
-        else:
-            return None, None
+        return df_c, df_t
     except Exception as e:
-        st.session_state['debug_err'] = f"Fallo de descarga/red: {str(e)}"
+        st.session_state['debug_err'] = str(e)
         return None, None
 
 def procesar_informacion():
@@ -72,47 +71,43 @@ def procesar_informacion():
     # --- PROCESAR PESTAÑA TARIFAS (HOJA 2 - A1: Date, B1: Rate) ---
     if df_2 is not None and not df_2.empty:
         try:
+            # Limpiamos los encabezados de columna quitando cualquier espacio accidental
+            df_2.columns = [str(c).strip() for c in df_2.columns]
+            
+            # Buscamos la columna de la Fecha y de la Tarifa por su orden físico (Columna 0 y Columna 1)
             if df_2.shape[1] >= 2:
-                # Usamos iloc para extraer las dos primeras columnas sin importar cómo se llamen internamente
-                columna_fecha_raw = df_2.iloc[:, 0]
-                columna_tarifa_raw = df_2.iloc[:, 1]
+                col_fecha_raw = df_2.iloc[:, 0]
+                col_rate_raw = df_2.iloc[:, 1]
                 
-                # TRIPLE CONVERSIÓN DE FECHAS: Convierte textos, marcas de tiempo de Excel y formatos mixtos de forma segura
-                fechas_transformadas = pd.to_datetime(columna_fecha_raw, errors='coerce', dayfirst=True)
-                fechas_transformadas = fechas_transformadas.fillna(pd.to_datetime(columna_fecha_raw.astype(str).str.strip(), errors='coerce', dayfirst=True))
-                fechas_transformadas = fechas_transformadas.fillna(pd.to_datetime(columna_fecha_raw, errors='coerce'))
-                
-                # Estandarizamos como texto plano rígido 'AAAA-MM-DD'
+                # Conversión segura y robusta para el formato latino (12/07/2026)
+                fechas_transformadas = pd.to_datetime(col_fecha_raw.astype(str).str.strip(), errors='coerce', dayfirst=True)
                 df_2['fecha_texto'] = fechas_transformadas.dt.strftime('%Y-%m-%d')
                 
-                # Limpieza estricta del factor de tarifa/multiplicador ($500,00 -> 500.00)
-                rate_limpio = columna_tarifa_raw.astype(str).str.replace(' ', '').str.replace('$', '').str.replace(',', '.').strip()
+                # Limpieza matemática de los precios ($500,00 -> 500.00)
+                rate_limpio = col_rate_raw.astype(str).str.replace(' ', '').str.replace('$', '').str.replace(',', '.').strip()
                 df_2['rate_num'] = pd.to_numeric(rate_limpio, errors='coerce')
                 
-                # Eliminamos registros vacíos o dañados
+                # Guardamos únicamente los renglones válidos
                 df_tarifas_limpias = df_2.dropna(subset=['fecha_texto', 'rate_num']).copy()
                 
                 if df_tarifas_limpias.empty:
                     st.session_state['status_tarifas'] = "error"
-                    st.session_state['debug_err'] = "No se pudieron procesar las celdas de la Hoja 2. Revisa que las fechas tengan formato válido."
             else:
                 st.session_state['status_tarifas'] = "error"
-                st.session_state['debug_err'] = "La Hoja 2 no contiene al menos 2 columnas."
         except Exception as e:
             st.session_state['status_tarifas'] = "error"
-            st.session_state['debug_err'] = f"Error de lectura en Hoja 2: {str(e)}"
+            st.session_state['debug_err'] = f"Error de mapeo: {str(e)}"
         
     return desc_base, tc_base, df_tarifas_limpias
 
-# Ejecución global protegida contra caídas
+# Ejecución global súper segura (Cero caídas o pantallas en blanco)
 try:
     desc_actual, tc_desde_drive, df_tarifas = procesar_informacion()
-except Exception as e:
+except Exception:
     desc_actual = 62.0
     tc_desde_drive = 17.40
     df_tarifas = pd.DataFrame()
     st.session_state['status_tarifas'] = "error"
-    st.session_state['debug_err'] = f"Fallo crítico: {str(e)}"
 
 # --- 3. PANEL LATERAL (SIDEBAR) ---
 with st.sidebar:
@@ -160,7 +155,7 @@ if check_out and check_in:
 else:
     noches = 1
 
-# Diferenciales base fijos aprobados por el hotel
+# Listado oficial de diferencias fijas (Diferenciales aprobados por dirección)
 diferenciales = {
     "Standard Two Double Beds": 0.0, "Junior Suite": 75.0, "Deluxe Suite": 0.0,
     "Executive Suite": 150.0, "One Bedroom Suite Garden": 225.0, "One Bedroom Suite": 300.0,
@@ -194,13 +189,13 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             total_factor_estancia = 0.0
             usando_precios_dinamicos = True
             
-            # Recorremos la estancia noche por noche haciendo la suma estacional
+            # Recorremos la estancia noche por noche
             for n in range(noches):
                 fecha_noche = check_in + timedelta(days=n)
                 fecha_noche_texto = fecha_noche.strftime('%Y-%m-%d')
                 
                 if not df_tarifas.empty:
-                    # Búsqueda exacta por coincidencia de texto estandarizado 'AAAA-MM-DD'
+                    # Búsqueda por texto estandarizado 'AAAA-MM-DD'
                     fila_dia = df_tarifas[df_tarifas['fecha_texto'] == fecha_noche_texto]
                     if not fila_dia.empty:
                         total_factor_estancia += fila_dia['rate_num'].values[0]
@@ -209,7 +204,7 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
                 else:
                     usando_precios_dinamicos = False
             
-            # --- CÁLCULO FINAL CON FACTOR TEMPORADA ---
+            # --- MATEMÁTICA CON FLUCTUACIÓN ---
             gap_base = diferenciales.get(cat_dest, 0.0) - diferenciales.get(cat_orig, 0.0)
             
             if usando_precios_dinamicos and total_factor_estancia > 0:
