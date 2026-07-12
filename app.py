@@ -113,12 +113,8 @@ with st.sidebar:
     )
     
     st.divider()
-    if st.button("🔄 Sincronizar Datos"):
+    if st.button("🔄 Sincronizar Datos", use_container_width=True):
         st.cache_data.clear()
-        try:
-            st.rerun()
-        except AttributeError:
-            st.experimental_rerun()
 
 # --- 4. INTERFAZ PRINCIPAL ---
 st.title("🏨 Cotizador de upsells")
