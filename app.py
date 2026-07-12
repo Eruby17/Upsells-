@@ -16,32 +16,27 @@ LOGO_URL = "https://cdn2.paraty.es/casa-dorada/images/89eeeacd45ffd2e"
 @st.cache_data(ttl=600, show_spinner=False)
 def obtener_datos_remotos():
     try:
-        # Descarga robusta en formato Excel original
-        url_excel = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=xlsx"
+        # Volvemos a la exportación nativa CSV usando los nombres exactos de tus hojas ("1" y "2")
+        url_c = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=1"
+        url_t = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=2"
         
         headers = {"User-Agent": "Mozilla/5.0"}
-        respuesta = requests.get(url_excel, headers=headers, timeout=10)
+        res_c = requests.get(url_c, headers=headers, timeout=7)
+        res_t = requests.get(url_t, headers=headers, timeout=7)
         
-        if respuesta.status_code == 200:
-            excel_file = io.BytesIO(respuesta.content)
-            xl = pd.ExcelFile(excel_file)
+        if res_c.status_code == 200 and res_t.status_code == 200:
+            contenido_c = res_c.content.decode('utf-8')
+            sep_c = ';' if ';' in contenido_c.split('\n')[0] else ','
+            df_c = pd.read_csv(io.StringIO(contenido_c), sep=sep_c)
             
-            # AUTO-DETECCIÓN: Tomamos los nombres reales de tus pestañas sin importar cuáles sean
-            nombres_reales = xl.sheet_names
-            
-            # La primera pestaña siempre será Configuración
-            name_config = nombres_reales[0]
-            # La segunda pestaña siempre será Tarifas (si existe, si no usa la primera)
-            name_tarifas = nombres_reales[1] if len(nombres_reales) > 1 else nombres_reales[0]
-            
-            df_c = xl.parse(name_config)
-            df_t = xl.parse(name_tarifas)
+            contenido_t = res_t.content.decode('utf-8')
+            sep_t = ';' if ';' in contenido_t.split('\n')[0] else ','
+            df_t = pd.read_csv(io.StringIO(contenido_t), sep=sep_t)
             
             return df_c, df_t
         else:
             return None, None
     except Exception as e:
-        # Si algo falla de verdad, dejamos rastro del error
         st.session_state['debug_err'] = str(e)
         return None, None
 
@@ -75,10 +70,9 @@ def procesar_informacion():
     # --- PROCESAR PESTAÑA TARIFAS (HOJA 2 - DATE / RATE) ---
     if df_2 is not None:
         try:
-            # Limpieza de nombres de columnas
             df_2.columns = [str(c).strip() for c in df_2.columns]
             
-            # Buscador flexible de columnas: detecta 'Date' o 'date' o 'DATE'
+            # Buscamos las columnas exactas
             col_fecha = [c for c in df_2.columns if c.lower() == 'date']
             col_tarifa = [c for c in df_2.columns if c.lower() == 'rate']
             
@@ -86,11 +80,10 @@ def procesar_informacion():
                 c_f = col_fecha[0]
                 c_r = col_tarifa[0]
                 
-                # Convertimos las fechas al formato de Python de manera súper flexible
+                # Formateo ultra flexible de fechas asumiendo día primero (12/07/2026)
                 fechas_transformadas = pd.to_datetime(df_2[c_f].astype(str).str.strip(), errors='coerce', dayfirst=True)
                 fechas_transformadas = fechas_transformadas.fillna(pd.to_datetime(df_2[c_f], errors='coerce'))
                 
-                # Guardamos como texto estandarizado 'AAAA-MM-DD'
                 df_2['fecha_texto'] = fechas_transformadas.dt.strftime('%Y-%m-%d')
                 
                 # Limpiamos el precio ($500,00 -> 500.00)
@@ -210,7 +203,7 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
                 else:
                     usando_precios_dinamicos = False
             
-            # --- MATEMÁTICA CON FLUCTUACIÓN ---
+            # --- MATEMÁTICA CON FLUCTUACIÓN EN BASE AL COMPORTAMIENTO ---
             gap_base = diferenciales.get(cat_dest, 0.0) - diferenciales.get(cat_orig, 0.0)
             
             if usando_precios_dinamicos and total_factor_estancia > 0:
