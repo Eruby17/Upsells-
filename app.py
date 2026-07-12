@@ -15,17 +15,31 @@ GID_CONFIG = "481323566"
 GID_TARIFAS = "0"
 LOGO_URL = "https://cdn2.paraty.es/casa-dorada/images/89eeeacd45ffd2e"
 
-def get_csv_url(gid):
-    # Usamos la API de visualización de Google que es más estable para exportar CSV puros
-    return f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&gid={gid}"
-
 @st.cache_data(ttl=600, show_spinner=False)
 def obtener_datos_remotos():
     try:
-        # sep=None y engine='python' detectan automáticamente si la hoja usa comas (,) o punto y coma (;)
-        df_c = pd.read_csv(get_csv_url(GID_CONFIG), sep=None, engine='python', timeout=5)
-        df_t = pd.read_csv(get_csv_url(GID_TARIFAS), sep=None, engine='python', timeout=5)
-        return df_c, df_t
+        # Enlaces de exportación directa que saltan el bloqueo de inicio de sesión de Google
+        url_c = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_CONFIG}"
+        url_t = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_TARIFAS}"
+        
+        # Descarga segura usando requests simulando una petición de navegador web limpia
+        headers = {"User-Agent": "Mozilla/5.0"}
+        res_c = requests.get(url_c, headers=headers, timeout=7)
+        res_t = requests.get(url_t, headers=headers, timeout=7)
+        
+        if res_c.status_code == 200 and res_t.status_code == 200:
+            # Detectamos si Google usó comas o puntos y comas por la configuración regional de tu hoja
+            contenido_c = res_c.content.decode('utf-8')
+            sep_c = ';' if ';' in contenido_c.split('\n')[0] else ','
+            df_c = pd.read_csv(io.StringIO(contenido_c), sep=sep_c)
+            
+            contenido_t = res_t.content.decode('utf-8')
+            sep_t = ';' if ';' in contenido_t.split('\n')[0] else ','
+            df_t = pd.read_csv(io.StringIO(contenido_t), sep=sep_t)
+            
+            return df_c, df_t
+        else:
+            return None, None
     except Exception:
         return None, None
 
@@ -38,18 +52,16 @@ def procesar_informacion():
     # --- PROCESAR PESTAÑA CONFIGURACIÓN ---
     if df_1 is not None:
         try:
-            # Limpieza estricta de nombres de columnas
+            # Forzar limpieza de nombres de columnas y registros
             df_1.columns = [str(c).strip().lower() for c in df_1.columns]
-            
-            # Limpieza de espacios vacíos dentro del texto de la columna parametro
             df_1['parametro'] = df_1['parametro'].astype(str).str.strip().str.lower()
             
-            # Búsqueda exacta e insensible a mayúsculas
             fila_desc = df_1[df_1['parametro'] == 'descuento']
             fila_tc = df_1[df_1['parametro'] == 'tc']
             
             if not fila_desc.empty:
-                d_val = str(fila_desc['valor'].values[0]).replace(',', '.').strip()
+                # Limpiamos posibles espacios, signos de % o formatos regionales de comas decimales
+                d_val = str(fila_desc['valor'].values[0]).replace('%', '').replace(',', '.').strip()
                 desc_base = float(d_val)
                 
             if not fila_tc.empty:
@@ -61,10 +73,9 @@ def procesar_informacion():
     # --- PROCESAR PESTAÑA TARIFAS ---
     if df_2 is not None:
         try:
-            # Limpieza de nombres de columnas
             df_2.columns = [str(c).strip() for c in df_2.columns]
             
-            # Buscar columnas sin importar si están en mayúsculas o minúsculas (Date/date, Rate/rate)
+            # Buscador inteligente de columnas insensible a mayúsculas/minúsculas
             col_fecha = [c for c in df_2.columns if c.lower() == 'date']
             col_tarifa = [c for c in df_2.columns if c.lower() == 'rate']
             
@@ -72,21 +83,19 @@ def procesar_informacion():
                 nombre_col_fecha = col_fecha[0]
                 nombre_col_tarifa = col_tarifa[0]
                 
-                # Procesar fechas de forma segura
                 df_2['Fecha_Final'] = pd.to_datetime(df_2[nombre_col_fecha], errors='coerce', dayfirst=True).dt.date
                 
-                # Tratamiento de números: quitar espacios, remover puntos de miles si existieran y cambiar coma decimal por punto
-                tarifa_limpia = df_2[nombre_col_tarifa].astype(str).str.replace(' ', '').str.replace('.', '', r=1).str.replace(',', '.')
+                # Tratamiento de precios de hospedaje con formato europeo/latino (comas decimales)
+                tarifa_limpia = df_2[nombre_col_tarifa].astype(str).str.replace(' ', '').str.replace('$', '').str.replace('.', '', r=1).str.replace(',', '.')
                 df_2['Rate_Num'] = pd.to_numeric(tarifa_limpia, errors='coerce')
                 
-                # Conservar sólo las filas que tengan fecha y precio válidos
                 df_tarifas_limpias = df_2.dropna(subset=['Fecha_Final', 'Rate_Num']).copy()
         except Exception:
             pass
         
     return desc_base, tc_base, df_tarifas_limpias
 
-# Ejecución segura de la lectura de datos
+# Ejecución de la lectura de datos con caídas controladas
 try:
     desc_actual, tc_desde_drive, df_tarifas = procesar_informacion()
 except Exception:
@@ -128,7 +137,6 @@ col_in, col_out = st.columns(2)
 with col_in: check_in = st.date_input("Check-in", datetime.now().date())
 with col_out: check_out = st.date_input("Check-out", datetime.now().date() + timedelta(days=1))
 
-# Cálculo seguro de noches
 if check_out and check_in:
     noches = (check_out - check_in).days
 else:
@@ -164,16 +172,15 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
         st.session_state.calc_ok = False
     else:
         with st.spinner("Generando documento seguro..."):
-            # Lógica matemática original intacta
             gap = diferenciales.get(cat_dest, 0.0) - diferenciales.get(cat_orig, 0.0)
             st.session_state.p_noche = (gap * (1 - desc_actual/100)) * 1.30
             st.session_state.t_usd = st.session_state.p_noche * noches
             st.session_state.t_mxn = st.session_state.t_usd * tc_actual
-            st.session_state.n_noches = noches
+            st.session_state.n_noches = aches = noches
             st.session_state.c_reserva = n_reserva if n_reserva.strip() else "Sin_Numero"
 
             try:
-                # --- GENERACIÓN SEGURA DE PDF VIA MEMORY BUFFER ---
+                # --- GENERACIÓN DE PDF ---
                 pdf = FPDF()
                 pdf.add_page()
                 
@@ -205,7 +212,6 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
                 pdf.set_font("Arial", '', 11)
                 pdf.ln(2)
                 
-                # Sanitizado estricto de texto para evitar fallos de codificación latinos
                 g_name = cliente.upper() if cliente else "VALUED GUEST"
                 pdf.cell(95, 8, f"Guest: {g_name}".encode('latin-1', 'replace').decode('latin-1'))
                 pdf.cell(95, 8, f"Confirmation: {st.session_state.c_reserva}".encode('latin-1', 'replace').decode('latin-1'), ln=True)
@@ -268,7 +274,6 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
                 pdf.set_x(125)
                 pdf.cell(75, 10, "Front Office Representative", align='C')
 
-                # Renderizado estable usando buffer de bytes puro
                 pdf_output_raw = pdf.output(dest='S')
                 if isinstance(pdf_output_raw, bytes):
                     st.session_state.pdf_data = pdf_output_raw
@@ -277,7 +282,6 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
 
                 st.session_state.calc_ok = True
                 
-                # Limpieza de archivo temporal de imagen
                 if os.path.exists(logo_path):
                     os.remove(logo_path)
                     
@@ -285,7 +289,7 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
                 st.error(f"Error crítico al compilar el PDF de cotización: {str(pdf_err)}")
                 st.session_state.calc_ok = False
 
-# --- 6. MUESTRA DE RESULTADOS Y DESCARGA PERSISTENTE ---
+# --- 6. MUESTRA DE RESULTADOS Y DESCARGA ---
 if st.session_state.calc_ok and st.session_state.pdf_data is not None:
     res1, res2, res3, res4 = st.columns(4)
     res1.metric("Noches", f"{st.session_state.n_noches}")
