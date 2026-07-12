@@ -18,17 +18,14 @@ LOGO_URL = "https://cdn2.paraty.es/casa-dorada/images/89eeeacd45ffd2e"
 @st.cache_data(ttl=600, show_spinner=False)
 def obtener_datos_remotos():
     try:
-        # Enlaces de exportación directa que saltan el bloqueo de inicio de sesión de Google
         url_c = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_CONFIG}"
         url_t = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={GID_TARIFAS}"
         
-        # Descarga segura usando requests simulando una petición de navegador web limpia
         headers = {"User-Agent": "Mozilla/5.0"}
         res_c = requests.get(url_c, headers=headers, timeout=7)
         res_t = requests.get(url_t, headers=headers, timeout=7)
         
         if res_c.status_code == 200 and res_t.status_code == 200:
-            # Detectamos si Google usó comas o puntos y comas por la configuración regional de tu hoja
             contenido_c = res_c.content.decode('utf-8')
             sep_c = ';' if ';' in contenido_c.split('\n')[0] else ','
             df_c = pd.read_csv(io.StringIO(contenido_c), sep=sep_c)
@@ -52,7 +49,6 @@ def procesar_informacion():
     # --- PROCESAR PESTAÑA CONFIGURACIÓN ---
     if df_1 is not None:
         try:
-            # Forzar limpieza de nombres de columnas y registros
             df_1.columns = [str(c).strip().lower() for c in df_1.columns]
             df_1['parametro'] = df_1['parametro'].astype(str).str.strip().str.lower()
             
@@ -60,7 +56,6 @@ def procesar_informacion():
             fila_tc = df_1[df_1['parametro'] == 'tc']
             
             if not fila_desc.empty:
-                # Limpiamos posibles espacios, signos de % o formatos regionales de comas decimales
                 d_val = str(fila_desc['valor'].values[0]).replace('%', '').replace(',', '.').strip()
                 desc_base = float(d_val)
                 
@@ -74,8 +69,6 @@ def procesar_informacion():
     if df_2 is not None:
         try:
             df_2.columns = [str(c).strip() for c in df_2.columns]
-            
-            # Buscador inteligente de columnas insensible a mayúsculas/minúsculas
             col_fecha = [c for c in df_2.columns if c.lower() == 'date']
             col_tarifa = [c for c in df_2.columns if c.lower() == 'rate']
             
@@ -84,8 +77,6 @@ def procesar_informacion():
                 nombre_col_tarifa = col_tarifa[0]
                 
                 df_2['Fecha_Final'] = pd.to_datetime(df_2[nombre_col_fecha], errors='coerce', dayfirst=True).dt.date
-                
-                # Tratamiento de precios de hospedaje con formato europeo/latino (comas decimales)
                 tarifa_limpia = df_2[nombre_col_tarifa].astype(str).str.replace(' ', '').str.replace('$', '').str.replace('.', '', r=1).str.replace(',', '.')
                 df_2['Rate_Num'] = pd.to_numeric(tarifa_limpia, errors='coerce')
                 
@@ -95,7 +86,7 @@ def procesar_informacion():
         
     return desc_base, tc_base, df_tarifas_limpias
 
-# Ejecución de la lectura de datos con caídas controladas
+# Ejecución segura de lectura
 try:
     desc_actual, tc_desde_drive, df_tarifas = procesar_informacion()
 except Exception:
@@ -124,7 +115,10 @@ with st.sidebar:
     st.divider()
     if st.button("🔄 Sincronizar Datos"):
         st.cache_data.clear()
-        st.rerun()
+        try:
+            st.rerun()
+        except AttributeError:
+            st.experimental_rerun()
 
 # --- 4. INTERFAZ PRINCIPAL ---
 st.title("🏨 Cotizador de upsells")
@@ -176,7 +170,7 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             st.session_state.p_noche = (gap * (1 - desc_actual/100)) * 1.30
             st.session_state.t_usd = st.session_state.p_noche * noches
             st.session_state.t_mxn = st.session_state.t_usd * tc_actual
-            st.session_state.n_noches = aches = noches
+            st.session_state.n_noches = noches
             st.session_state.c_reserva = n_reserva if n_reserva.strip() else "Sin_Numero"
 
             try:
