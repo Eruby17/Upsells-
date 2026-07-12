@@ -16,7 +16,7 @@ LOGO_URL = "https://cdn2.paraty.es/casa-dorada/images/89eeeacd45ffd2e"
 @st.cache_data(ttl=600, show_spinner=False)
 def obtener_datos_remotos():
     try:
-        # Descargamos el libro completo en formato Excel nativo (.xlsx) para evitar problemas de GID=0
+        # Descarga robusta en formato Excel original
         url_excel = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=xlsx"
         
         headers = {"User-Agent": "Mozilla/5.0"}
@@ -26,14 +26,23 @@ def obtener_datos_remotos():
             excel_file = io.BytesIO(respuesta.content)
             xl = pd.ExcelFile(excel_file)
             
-            # Forzamos la lectura de las hojas llamadas "1" y "2"
-            df_c = xl.parse("1") if "1" in xl.sheet_names else xl.parse(xl.sheet_names[0])
-            df_t = xl.parse("2") if "2" in xl.sheet_names else xl.parse(xl.sheet_names[1]) if len(xl.sheet_names) > 1 else xl.parse(xl.sheet_names[0])
+            # AUTO-DETECCIÓN: Tomamos los nombres reales de tus pestañas sin importar cuáles sean
+            nombres_reales = xl.sheet_names
+            
+            # La primera pestaña siempre será Configuración
+            name_config = nombres_reales[0]
+            # La segunda pestaña siempre será Tarifas (si existe, si no usa la primera)
+            name_tarifas = nombres_reales[1] if len(nombres_reales) > 1 else nombres_reales[0]
+            
+            df_c = xl.parse(name_config)
+            df_t = xl.parse(name_tarifas)
             
             return df_c, df_t
         else:
             return None, None
-    except Exception:
+    except Exception as e:
+        # Si algo falla de verdad, dejamos rastro del error
+        st.session_state['debug_err'] = str(e)
         return None, None
 
 def procesar_informacion():
@@ -66,22 +75,33 @@ def procesar_informacion():
     # --- PROCESAR PESTAÑA TARIFAS (HOJA 2 - DATE / RATE) ---
     if df_2 is not None:
         try:
+            # Limpieza de nombres de columnas
             df_2.columns = [str(c).strip() for c in df_2.columns]
             
-            # Buscamos las columnas exactas por su nombre
-            col_fecha = [c for c in df_2.columns if c.lower() == 'date'][0]
-            col_tarifa = [c for c in df_2.columns if c.lower() == 'rate'][0]
+            # Buscador flexible de columnas: detecta 'Date' o 'date' o 'DATE'
+            col_fecha = [c for c in df_2.columns if c.lower() == 'date']
+            col_tarifa = [c for c in df_2.columns if c.lower() == 'rate']
             
-            # Convertimos las fechas de forma segura forzando el formato latino (día primero: 12/07/2026)
-            df_2['fecha_limpia'] = pd.to_datetime(df_2[col_fecha], errors='coerce', dayfirst=True).dt.date
-            
-            # Limpiamos el factor numérico (Rate) removiendo el signo de pesos y cambiando la coma por punto decimal ($500,00 -> 500.00)
-            rate_limpio = df_2[col_tarifa].astype(str).str.replace(' ', '').str.replace('$', '').str.replace(',', '.').strip()
-            df_2['rate_num'] = pd.to_numeric(rate_limpio, errors='coerce')
-            
-            df_tarifas_limpias = df_2.dropna(subset=['fecha_limpia', 'rate_num']).copy()
-            
-            if df_tarifas_limpias.empty:
+            if col_fecha and col_tarifa:
+                c_f = col_fecha[0]
+                c_r = col_tarifa[0]
+                
+                # Convertimos las fechas al formato de Python de manera súper flexible
+                fechas_transformadas = pd.to_datetime(df_2[c_f].astype(str).str.strip(), errors='coerce', dayfirst=True)
+                fechas_transformadas = fechas_transformadas.fillna(pd.to_datetime(df_2[c_f], errors='coerce'))
+                
+                # Guardamos como texto estandarizado 'AAAA-MM-DD'
+                df_2['fecha_texto'] = fechas_transformadas.dt.strftime('%Y-%m-%d')
+                
+                # Limpiamos el precio ($500,00 -> 500.00)
+                rate_limpio = df_2[c_r].astype(str).str.replace(' ', '').str.replace('$', '').str.replace(',', '.').strip()
+                df_2['rate_num'] = pd.to_numeric(rate_limpio, errors='coerce')
+                
+                df_tarifas_limpias = df_2.dropna(subset=['fecha_texto', 'rate_num']).copy()
+                
+                if df_tarifas_limpias.empty:
+                    st.session_state['status_tarifas'] = "error"
+            else:
                 st.session_state['status_tarifas'] = "error"
         except Exception:
             st.session_state['status_tarifas'] = "error"
@@ -124,6 +144,8 @@ with st.sidebar:
         st.success("Tarifas cargadas correctamente")
     else:
         st.error("Problema al cargar tarifas")
+        if 'debug_err' in st.session_state:
+            st.caption(f"Detalle técnico: {st.session_state['debug_err']}")
 
 # --- 4. INTERFAZ PRINCIPAL ---
 st.title("🏨 Cotizador de upsells")
@@ -141,7 +163,7 @@ if check_out and check_in:
 else:
     noches = 1
 
-# Listado de diferencias fijas aprobadas por la dirección del hotel
+# Listado de diferencias fijas
 diferenciales = {
     "Standard Two Double Beds": 0.0, "Junior Suite": 75.0, "Deluxe Suite": 0.0,
     "Executive Suite": 150.0, "One Bedroom Suite Garden": 225.0, "One Bedroom Suite": 300.0,
@@ -175,13 +197,12 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             total_factor_estancia = 0.0
             usando_precios_dinamicos = True
             
-            # Recorremos la estancia noche por noche acumulando el factor Rate del Drive
             for n in range(noches):
                 fecha_noche = check_in + timedelta(days=n)
+                fecha_noche_texto = fecha_noche.strftime('%Y-%m-%d')
                 
                 if not df_tarifas.empty:
-                    # Buscamos el factor Rate asignado a este día en específico
-                    fila_dia = df_tarifas[df_tarifas['fecha_limpia'] == fecha_noche]
+                    fila_dia = df_tarifas[df_tarifas['fecha_texto'] == fecha_noche_texto]
                     if not fila_dia.empty:
                         total_factor_estancia += fila_dia['rate_num'].values[0]
                     else:
@@ -193,12 +214,10 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
             gap_base = diferenciales.get(cat_dest, 0.0) - diferenciales.get(cat_orig, 0.0)
             
             if usando_precios_dinamicos and total_factor_estancia > 0:
-                # El factor promedio de la temporada multiplica al diferencial fijo de la habitación
                 factor_promedio = total_factor_estancia / noches
                 st.session_state.p_noche = (gap_base * factor_promedio) * (1 - desc_actual/100) * 1.30
             else:
-                # Fallback seguro: Si la fecha no está en Drive, asume factor neutro (1.0) y muestra aviso
-                st.warning("⚠️ Nota: Fechas no localizadas en el calendario de la Hoja 2. Se aplicó tarifa base de respaldo.")
+                st.warning("⚠️ Nota: Fechas de tarifas no localizadas en el calendario de la Hoja 2. Se aplicó tarifa base de respaldo.")
                 st.session_state.p_noche = (gap_base * (1 - desc_actual/100)) * 1.30
                 
             st.session_state.t_usd = st.session_state.p_noche * noches
