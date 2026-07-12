@@ -16,22 +16,26 @@ LOGO_URL = "https://cdn2.paraty.es/casa-dorada/images/89eeeacd45ffd2e"
 @st.cache_data(ttl=600, show_spinner=False)
 def obtener_datos_remotos():
     try:
-        # Volvemos a la exportación nativa CSV usando los nombres exactos de tus hojas ("1" y "2")
-        url_c = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=1"
-        url_t = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=2"
+        # Descarga perfecta en formato Excel nativo (.xlsx)
+        url_excel = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=xlsx"
         
         headers = {"User-Agent": "Mozilla/5.0"}
-        res_c = requests.get(url_c, headers=headers, timeout=7)
-        res_t = requests.get(url_t, headers=headers, timeout=7)
+        respuesta = requests.get(url_excel, headers=headers, timeout=10)
         
-        if res_c.status_code == 200 and res_t.status_code == 200:
-            contenido_c = res_c.content.decode('utf-8')
-            sep_c = ';' if ';' in contenido_c.split('\n')[0] else ','
-            df_c = pd.read_csv(io.StringIO(contenido_c), sep=sep_c)
+        if respuesta.status_code == 200:
+            excel_file = io.BytesIO(respuesta.content)
+            # openpyxl entra en acción aquí de forma automática gracias a engine='openpyxl'
+            xl = pd.ExcelFile(excel_file, engine='openpyxl')
             
-            contenido_t = res_t.content.decode('utf-8')
-            sep_t = ';' if ';' in contenido_t.split('\n')[0] else ','
-            df_t = pd.read_csv(io.StringIO(contenido_t), sep=sep_t)
+            nombres_pestañas = xl.sheet_names
+            
+            # Posición 0 = Primera pestaña física de tu Drive (Configuración)
+            name_config = nombres_pestañas[0]
+            # Posición 1 = Segunda pestaña física de tu Drive (Tarifas con Date y Rate)
+            name_tarifas = nombres_pestañas[1] if len(nombres_pestañas) > 1 else nombres_pestañas[0]
+            
+            df_c = xl.parse(name_config)
+            df_t = xl.parse(name_tarifas)
             
             return df_c, df_t
         else:
@@ -72,7 +76,6 @@ def procesar_informacion():
         try:
             df_2.columns = [str(c).strip() for c in df_2.columns]
             
-            # Buscamos las columnas exactas
             col_fecha = [c for c in df_2.columns if c.lower() == 'date']
             col_tarifa = [c for c in df_2.columns if c.lower() == 'rate']
             
@@ -80,13 +83,13 @@ def procesar_informacion():
                 c_f = col_fecha[0]
                 c_r = col_tarifa[0]
                 
-                # Formateo ultra flexible de fechas asumiendo día primero (12/07/2026)
-                fechas_transformadas = pd.to_datetime(df_2[c_f].astype(str).str.strip(), errors='coerce', dayfirst=True)
+                # Al usar openpyxl, Excel ya sabe si es fecha, pero lo blindamos por si acaso
+                fechas_transformadas = pd.to_datetime(df_2[c_f], errors='coerce', dayfirst=True)
                 fechas_transformadas = fechas_transformadas.fillna(pd.to_datetime(df_2[c_f], errors='coerce'))
                 
                 df_2['fecha_texto'] = fechas_transformadas.dt.strftime('%Y-%m-%d')
                 
-                # Limpiamos el precio ($500,00 -> 500.00)
+                # Limpieza matemática estricta ($500,00 -> 500.00)
                 rate_limpio = df_2[c_r].astype(str).str.replace(' ', '').str.replace('$', '').str.replace(',', '.').strip()
                 df_2['rate_num'] = pd.to_numeric(rate_limpio, errors='coerce')
                 
@@ -101,7 +104,7 @@ def procesar_informacion():
         
     return desc_base, tc_base, df_tarifas_limpias
 
-# Ejecución segura de la lectura
+# Ejecución de la lectura
 try:
     desc_actual, tc_desde_drive, df_tarifas = procesar_informacion()
 except Exception:
@@ -156,7 +159,7 @@ if check_out and check_in:
 else:
     noches = 1
 
-# Listado de diferencias fijas
+# Listado de diferencias fijas aprobadas
 diferenciales = {
     "Standard Two Double Beds": 0.0, "Junior Suite": 75.0, "Deluxe Suite": 0.0,
     "Executive Suite": 150.0, "One Bedroom Suite Garden": 225.0, "One Bedroom Suite": 300.0,
