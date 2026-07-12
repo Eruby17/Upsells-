@@ -72,10 +72,10 @@ def procesar_informacion():
             col_fecha = [c for c in df_2.columns if c.lower() == 'date'][0]
             col_tarifa = [c for c in df_2.columns if c.lower() == 'rate'][0]
             
-            # Convertimos las fechas de forma segura
-            df_2['fecha_limpia'] = pd.to_datetime(df_2[col_fecha], errors='coerce').dt.date
+            # Convertimos las fechas de forma segura forzando el formato latino (día primero: 12/07/2026)
+            df_2['fecha_limpia'] = pd.to_datetime(df_2[col_fecha], errors='coerce', dayfirst=True).dt.date
             
-            # Limpiamos el factor numérico de la temporada (Rate) manejando comas decimales regionales
+            # Limpiamos el factor numérico (Rate) removiendo el signo de pesos y cambiando la coma por punto decimal ($500,00 -> 500.00)
             rate_limpio = df_2[col_tarifa].astype(str).str.replace(' ', '').str.replace('$', '').str.replace(',', '.').strip()
             df_2['rate_num'] = pd.to_numeric(rate_limpio, errors='coerce')
             
@@ -189,7 +189,7 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
                 else:
                     usando_precios_dinamicos = False
             
-            # --- MATEMÁTICA CON FLUCTUACIÓN EN BASE AL COMPORTAMIENTO ---
+            # --- MATEMÁTICA CON FLUCTUACIÓN ---
             gap_base = diferenciales.get(cat_dest, 0.0) - diferenciales.get(cat_orig, 0.0)
             
             if usando_precios_dinamicos and total_factor_estancia > 0:
