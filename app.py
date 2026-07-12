@@ -16,13 +16,15 @@ GID_TARIFAS = "0"
 LOGO_URL = "https://cdn2.paraty.es/casa-dorada/images/89eeeacd45ffd2e"
 
 def get_csv_url(gid):
-    return f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={gid}"
+    # Usamos la API de visualización de Google que es más estable para exportar CSV puros
+    return f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&gid={gid}"
 
 @st.cache_data(ttl=600, show_spinner=False)
 def obtener_datos_remotos():
     try:
-        df_c = pd.read_csv(get_csv_url(GID_CONFIG), timeout=5)
-        df_t = pd.read_csv(get_csv_url(GID_TARIFAS), timeout=5)
+        # sep=None y engine='python' detectan automáticamente si la hoja usa comas (,) o punto y coma (;)
+        df_c = pd.read_csv(get_csv_url(GID_CONFIG), sep=None, engine='python', timeout=5)
+        df_t = pd.read_csv(get_csv_url(GID_TARIFAS), sep=None, engine='python', timeout=5)
         return df_c, df_t
     except Exception:
         return None, None
@@ -33,22 +35,52 @@ def procesar_informacion():
     desc_base = 62.0
     df_tarifas_limpias = pd.DataFrame()
 
+    # --- PROCESAR PESTAÑA CONFIGURACIÓN ---
     if df_1 is not None:
         try:
+            # Limpieza estricta de nombres de columnas
             df_1.columns = [str(c).strip().lower() for c in df_1.columns]
-            d_val = df_1[df_1['parametro'].str.contains('descuento', na=False)]['valor'].values[0]
-            t_val = df_1[df_1['parametro'].str.contains('tc', na=False)]['valor'].values[0]
-            desc_base = float(str(d_val).replace(',', '.'))
-            tc_base = float(str(t_val).replace(',', '.'))
+            
+            # Limpieza de espacios vacíos dentro del texto de la columna parametro
+            df_1['parametro'] = df_1['parametro'].astype(str).str.strip().str.lower()
+            
+            # Búsqueda exacta e insensible a mayúsculas
+            fila_desc = df_1[df_1['parametro'] == 'descuento']
+            fila_tc = df_1[df_1['parametro'] == 'tc']
+            
+            if not fila_desc.empty:
+                d_val = str(fila_desc['valor'].values[0]).replace(',', '.').strip()
+                desc_base = float(d_val)
+                
+            if not fila_tc.empty:
+                t_val = str(fila_tc['valor'].values[0]).replace(',', '.').strip()
+                tc_base = float(t_val)
         except Exception:
             pass
 
+    # --- PROCESAR PESTAÑA TARIFAS ---
     if df_2 is not None:
         try:
+            # Limpieza de nombres de columnas
             df_2.columns = [str(c).strip() for c in df_2.columns]
-            df_2['Fecha_Final'] = pd.to_datetime(df_2['Date'], errors='coerce', dayfirst=True).dt.date
-            df_2['Rate_Num'] = pd.to_numeric(df_2['Rate'].astype(str).str.replace(r'[^\d.]', '', regex=True), errors='coerce')
-            df_tarifas_limpias = df_2.dropna(subset=['Fecha_Final', 'Rate_Num']).copy()
+            
+            # Buscar columnas sin importar si están en mayúsculas o minúsculas (Date/date, Rate/rate)
+            col_fecha = [c for c in df_2.columns if c.lower() == 'date']
+            col_tarifa = [c for c in df_2.columns if c.lower() == 'rate']
+            
+            if col_fecha and col_tarifa:
+                nombre_col_fecha = col_fecha[0]
+                nombre_col_tarifa = col_tarifa[0]
+                
+                # Procesar fechas de forma segura
+                df_2['Fecha_Final'] = pd.to_datetime(df_2[nombre_col_fecha], errors='coerce', dayfirst=True).dt.date
+                
+                # Tratamiento de números: quitar espacios, remover puntos de miles si existieran y cambiar coma decimal por punto
+                tarifa_limpia = df_2[nombre_col_tarifa].astype(str).str.replace(' ', '').str.replace('.', '', r=1).str.replace(',', '.')
+                df_2['Rate_Num'] = pd.to_numeric(tarifa_limpia, errors='coerce')
+                
+                # Conservar sólo las filas que tengan fecha y precio válidos
+                df_tarifas_limpias = df_2.dropna(subset=['Fecha_Final', 'Rate_Num']).copy()
         except Exception:
             pass
         
@@ -116,7 +148,7 @@ with col_cat2: cat_dest = st.selectbox("Upgrade a Categoría", list(diferenciale
 
 st.divider()
 
-# --- 5. INITIALIZACIÓN DE SESIÓN ---
+# --- 5. INICIALIZACIÓN DE SESIÓN ---
 if "calc_ok" not in st.session_state:
     st.session_state.calc_ok = False
     st.session_state.pdf_data = None
@@ -236,7 +268,7 @@ if st.button("💰 Calcular Cotización", type="primary", use_container_width=Tr
                 pdf.set_x(125)
                 pdf.cell(75, 10, "Front Office Representative", align='C')
 
-                # Renderizado ultra estable usando buffer de bytes puro
+                # Renderizado estable usando buffer de bytes puro
                 pdf_output_raw = pdf.output(dest='S')
                 if isinstance(pdf_output_raw, bytes):
                     st.session_state.pdf_data = pdf_output_raw
