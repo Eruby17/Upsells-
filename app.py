@@ -142,7 +142,7 @@ if df_config_raw is not None:
         val = limpiar_valor_moneda(fila['valor'])
         config_dict[param] = val
     
-    tc_raw = config_dict.get("tc", 17.40)
+    tc_raw = config_dict.get("tc", 17.00)
     while tc_raw > 100.0:
         tc_raw /= 100.0
 
