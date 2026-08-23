@@ -8,7 +8,7 @@ from google.oauth2.service_account import Credentials
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Cotizador de upsells - Casa Dorada", page_icon="🏨", layout="wide")
 
-# --- 2. BASE DE DATOS LOCAL Y CONEXIÓN GOOGLE DRIVE ---
+# --- 2. BASE DE DATOS LOCAL Y CONFIGURACIONES GENERALES ---
 PASSWORD_ADMIN = "Revenue2026"
 MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
 
@@ -65,7 +65,6 @@ def limpiar_valor_moneda(val):
     except ValueError:
         return 0.0
 
-@st.cache_data(ttl=300, show_spinner=False)
 def descargar_datos_puros_drive():
     try:
         gc = obtener_cliente_gspread()
@@ -89,20 +88,8 @@ def descargar_datos_puros_drive():
             pass
 
         return df_c, df_d, df_rangos
-    except Exception as e:
+    except Exception:
         return None, None, pd.DataFrame()
-
-def cargar_y_procesar_datos():
-    df_c, df_d, df_rangos = descargar_datos_puros_drive()
-    
-    if df_d is not None and 'mes' in df_d.columns:
-        df_d = df_d.copy()
-        df_d['mes'] = df_d['mes'].astype(str).str.strip().str.capitalize()
-        df_d.set_index("mes", inplace=True)
-        for col in df_d.columns:
-            df_d[col] = df_d[col].apply(limpiar_valor_moneda)
-            
-    return df_c, df_d, df_rangos
 
 def preparar_df_rangos(df):
     if df is None or df.empty:
@@ -126,57 +113,70 @@ def preparar_df_rangos(df):
         
     return df_res[["Nombre Temporada", "Fecha Inicio", "Fecha Fin", "Tarifa Base ($)"]]
 
-# --- CARGA DIRECTA Y PRIORITARIA DESDE GOOGLE DRIVE ---
-df_config_raw, df_diferenciales_raw, df_rangos_raw = cargar_y_procesar_datos()
-
-if df_diferenciales_raw is not None:
-    st.session_state['matriz_diferenciales'] = df_diferenciales_raw
-
-if df_rangos_raw is not None:
-    st.session_state['rangos_especiales'] = preparar_df_rangos(df_rangos_raw)
-
-if df_config_raw is not None:
-    config_dict = {}
-    for _, fila in df_config_raw.iterrows():
-        param = str(fila['parametro']).strip().lower()
-        val = limpiar_valor_moneda(fila['valor'])
-        config_dict[param] = val
+# --- CARGA OPTIMIZADA A LA CACHÉ DE LA APLICACIÓN (TTL = 12 Horas) ---
+@st.cache_data(ttl=43200, show_spinner=False)
+def obtener_datos_cacheados():
+    df_c, df_d, df_rangos = descargar_datos_puros_drive()
     
-    tc_raw = config_dict.get("tc", 17.00)
-    while tc_raw > 100.0:
-        tc_raw /= 100.0
+    # Procesar dataframe de diferenciales
+    if df_d is not None and 'mes' in df_d.columns:
+        df_d = df_d.copy()
+        df_d['mes'] = df_d['mes'].astype(str).str.strip().str.capitalize()
+        df_d.set_index("mes", inplace=True)
+        for col in df_d.columns:
+            df_d[col] = df_d[col].apply(limpiar_valor_moneda)
+            
+    # Procesar dataframe de rangos
+    df_r_prep = preparar_df_rangos(df_rangos)
+    
+    # Procesar configuraciones globales
+    config_dict = {"descuento": 60.0, "tc": 17.40}
+    if df_c is not None and not df_c.empty:
+        raw_cfg = {}
+        for _, fila in df_c.iterrows():
+            param = str(fila['parametro']).strip().lower()
+            val = limpiar_valor_moneda(fila['valor'])
+            raw_cfg[param] = val
+        
+        tc_raw = raw_cfg.get("tc", 17.40)
+        while tc_raw > 100.0: 
+            tc_raw /= 100.0
+            
+        desc_raw = raw_cfg.get("descuento", 60.0)
+        while desc_raw > 100.0: 
+            desc_raw /= 100.0
+            
+        config_dict = {
+            "descuento": float(desc_raw) if desc_raw > 0 else 60.0,
+            "tc": float(tc_raw) if tc_raw > 0 else 17.40
+        }
+        
+    return df_d, df_r_prep, config_dict
 
-    desc_raw = config_dict.get("descuento", 60.0)
-    while desc_raw > 100.0:
-        desc_raw /= 100.0
-
-    st.session_state['config_global'] = {
-        "descuento": float(desc_raw) if desc_raw > 0 else 60.0,
-        "tc": float(tc_raw) if tc_raw > 0 else 17.40
-    }
-
-# Respaldos de emergencia
+# INICIALIZACIÓN ÚNICA DE SESSION_STATE (LEER DE CACHÉ O RESPALDO)
 if 'matriz_diferenciales' not in st.session_state:
-    base_data = {}
-    for cat in CATEGORIAS:
-        factor = PROPORCIONES.get(cat, 0.0)
-        base_data[cat] = [float(round(75.0 * factor, 2)) for _ in range(12)]
-    st.session_state['matriz_diferenciales'] = pd.DataFrame(base_data, index=MESES)
+    try:
+        df_d, df_r, cfg = obtener_datos_cacheados()
+        if df_d is not None and not df_d.empty:
+            st.session_state['matriz_diferenciales'] = df_d
+            st.session_state['rangos_especiales'] = df_r
+            st.session_state['config_global'] = cfg
+        else:
+            raise Exception("No se obtuvieron datos válidos de Google Drive.")
+    except Exception:
+        # Respaldo inmediato en caso de falla de conexión
+        base_data = {cat: [float(round(75.0 * PROPORCIONES.get(cat, 0.0), 2)) for _ in range(12)] for cat in CATEGORIAS}
+        st.session_state['matriz_diferenciales'] = pd.DataFrame(base_data, index=MESES)
+        st.session_state['rangos_especiales'] = pd.DataFrame(columns=["Nombre Temporada", "Fecha Inicio", "Fecha Fin", "Tarifa Base ($)"])
+        st.session_state['config_global'] = {"descuento": 60.0, "tc": 17.40}
 
-if 'config_global' not in st.session_state:
-    st.session_state['config_global'] = {
-        "descuento": 60.0, "tc": 17.40
-    }
-
-# Control de límite de refrescos por usuario
 if 'tarifa_refrescada' not in st.session_state:
     st.session_state['tarifa_refrescada'] = False
 
-# --- 3. MENÚ LATERAL: PANEL DE CONTROL DE REVENUE Y BOTÓN RECEPCIÓN ---
+# --- 3. MENÚ LATERAL: PANEL DE CONTROL Y ADMINISTRACIÓN ---
 with st.sidebar:
     st.header("⚙️ Operaciones")
     
-    # BOTÓN PARA RECEPCIÓN CON LÍMITE DE UN USO POR SESIÓN
     if not st.session_state['tarifa_refrescada']:
         if st.button("🔄 Refrescar tarifas", use_container_width=True):
             st.session_state['tarifa_refrescada'] = True
