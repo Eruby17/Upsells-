@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
+import os
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Cotizador de upsells - Casa Dorada", page_icon="🏨", layout="wide")
@@ -388,10 +389,20 @@ else:
             pdf = FPDF()
             pdf.add_page()
             
+            # Insertar el logo en la parte superior izquierda (si existe el archivo en la raíz del repositorio)
+            logo_path = "logo 12.png"
+            if os.path.exists(logo_path):
+                # x=10, y=8, ancho=35mm (mantiene la proporción de alto automáticamente)
+                pdf.image(logo_path, x=10, y=8, w=35)
+                # Mover cursor a la derecha para no encimar el nombre del hotel con la imagen
+                pdf.set_xy(48, 12)
+            else:
+                pdf.set_y(10)
+
             pdf.set_font("Helvetica", 'B', 12)
             pdf.cell(0, 10, "CASA DORADA LOS CABOS", new_x="LMARGIN", new_y="NEXT")
 
-            pdf.ln(25)
+            pdf.ln(15)
             pdf.set_font("Helvetica", 'B', 16)
             pdf.cell(0, 10, "ROOM UPGRADE AGREEMENT", align='R', new_x="LMARGIN", new_y="NEXT")
             pdf.set_font("Helvetica", '', 10)
