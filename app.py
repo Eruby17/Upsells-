@@ -113,12 +113,7 @@ def preparar_df_rangos(df):
         
     return df_res[["Nombre Temporada", "Fecha Inicio", "Fecha Fin", "Tarifa Base ($)"]]
 
-# --- CARGA OPTIMIZADA A LA CACHÉ DE LA APLICACIÓN (TTL = 12 Horas) ---
-@st.cache_data(ttl=43200, show_spinner=False)
-def obtener_datos_cacheados():
-    df_c, df_d, df_rangos = descargar_datos_puros_drive()
-    
-    # Procesar dataframe de diferenciales
+def procesar_datos_drive(df_c, df_d, df_rangos):
     if df_d is not None and 'mes' in df_d.columns:
         df_d = df_d.copy()
         df_d['mes'] = df_d['mes'].astype(str).str.strip().str.capitalize()
@@ -126,10 +121,8 @@ def obtener_datos_cacheados():
         for col in df_d.columns:
             df_d[col] = df_d[col].apply(limpiar_valor_moneda)
             
-    # Procesar dataframe de rangos
     df_r_prep = preparar_df_rangos(df_rangos)
     
-    # Procesar configuraciones globales
     config_dict = {"descuento": 60.0, "tc": 17.40}
     if df_c is not None and not df_c.empty:
         raw_cfg = {}
@@ -152,6 +145,12 @@ def obtener_datos_cacheados():
         }
         
     return df_d, df_r_prep, config_dict
+
+# --- CARGA OPTIMIZADA A LA CACHÉ DE LA APLICACIÓN (TTL = 12 Horas) ---
+@st.cache_data(ttl=43200, show_spinner=False)
+def obtener_datos_cacheados():
+    df_c, df_d, df_rangos = descargar_datos_puros_drive()
+    return procesar_datos_drive(df_c, df_d, df_rangos)
 
 # INICIALIZACIÓN ÚNICA DE SESSION_STATE (LEER DE CACHÉ O RESPALDO)
 if 'matriz_diferenciales' not in st.session_state:
@@ -179,13 +178,18 @@ with st.sidebar:
     
     if not st.session_state['tarifa_refrescada']:
         if st.button("🔄 Refrescar tarifas", use_container_width=True):
-            st.session_state['tarifa_refrescada'] = True
-            st.cache_data.clear()
-            if 'matriz_diferenciales' in st.session_state: del st.session_state['matriz_diferenciales']
-            if 'rangos_especiales' in st.session_state: del st.session_state['rangos_especiales']
-            if 'config_global' in st.session_state: del st.session_state['config_global']
-            st.toast("Tarifas actualizadas directamente desde Google Drive", icon="✅")
-            st.rerun()
+            with st.spinner("Consultando datos en Google Drive..."):
+                df_c_ fresh, df_d_fresh, df_r_fresh = descargar_datos_puros_drive()
+                if df_d_fresh is not None and not df_d_fresh.empty:
+                    df_d_proc, df_r_proc, cfg_proc = procesar_datos_drive(df_c_fresh, df_d_fresh, df_r_fresh)
+                    st.session_state['matriz_diferenciales'] = df_d_proc
+                    st.session_state['rangos_especiales'] = df_r_proc
+                    st.session_state['config_global'] = cfg_proc
+                    st.session_state['tarifa_refrescada'] = True
+                    st.toast("Tarifas cargadas en solo lectura desde Google Drive", icon="✅")
+                    st.rerun()
+                else:
+                    st.error("No se pudieron consultar los datos de Google Drive.")
     else:
         st.button("✅ Tarifas actualizadas (Límite alcanzado)", disabled=True, use_container_width=True)
         st.caption("🔒 Has alcanzado el límite de actualización manual por sesión para proteger la conexión con Drive.")
