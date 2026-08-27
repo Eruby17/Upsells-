@@ -179,7 +179,7 @@ with st.sidebar:
     if not st.session_state['tarifa_refrescada']:
         if st.button("🔄 Refrescar tarifas", use_container_width=True):
             with st.spinner("Consultando datos en Google Drive..."):
-                df_c_ fresh, df_d_fresh, df_r_fresh = descargar_datos_puros_drive()
+                df_c_fresh, df_d_fresh, df_r_fresh = descargar_datos_puros_drive()
                 if df_d_fresh is not None and not df_d_fresh.empty:
                     df_d_proc, df_r_proc, cfg_proc = procesar_datos_drive(df_c_fresh, df_d_fresh, df_r_fresh)
                     st.session_state['matriz_diferenciales'] = df_d_proc
