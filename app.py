@@ -366,19 +366,96 @@ else:
         desc_actual = cfg['descuento']
         tc_actual = cfg['tc']
         
-        p_noche_neto = gap_promedio_estacional * (1 - desc_actual / 100)
-        st.session_state['p_noche_estacional'] = p_noche_neto
+        # Tarifa sugerida por el cotizador (antes de cualquier modificación manual)
+        tarifa_sugerida_neto = gap_promedio_estacional * (1 - desc_actual / 100)
+        st.session_state['p_noche_estacional'] = tarifa_sugerida_neto
         
-        impuesto_por_noche = p_noche_neto * 0.30
-        p_noche_con_impuestos = p_noche_neto + impuesto_por_noche
-        
+        tarifa_sugerida_impuestos = tarifa_sugerida_neto * 0.30
+        tarifa_sugerida_con_impuestos = tarifa_sugerida_neto + tarifa_sugerida_impuestos
+
+        # Cada vez que el usuario pulsa Calcular iniciamos con la tarifa sugerida.
+        # Esto evita arrastrar una tarifa manual de una cotización anterior.
+        if ejecutar_calculo:
+            st.session_state['modo_tarifa_manual'] = False
+            st.session_state.pop('tarifa_manual_input', None)
+
+        if 'modo_tarifa_manual' not in st.session_state:
+            st.session_state['modo_tarifa_manual'] = False
+
+        # Por defecto, la tarifa final es la sugerida por el cotizador.
+        # Si se activa la modificación manual, estas variables se reemplazan
+        # ANTES de mostrar resultados y ANTES de generar el PDF.
+        p_noche_neto = tarifa_sugerida_neto
+        impuesto_por_noche = tarifa_sugerida_impuestos
+        p_noche_con_impuestos = tarifa_sugerida_con_impuestos
+
+        st.subheader("Tarifa sugerida por cotizador")
+        st.metric(
+            "Tarifa sugerida por cotizador (USD / noche con impuestos)",
+            f"${tarifa_sugerida_con_impuestos:,.2f}"
+        )
+
+        if not st.session_state['modo_tarifa_manual']:
+            if st.button("Modificar tarifa manual", use_container_width=True):
+                st.session_state['modo_tarifa_manual'] = True
+                st.rerun()
+        else:
+            tarifa_minima = float(round(tarifa_sugerida_con_impuestos, 2))
+
+            st.warning(
+                f"La tarifa manual no puede ser menor a la tarifa sugerida "
+                f"por cotizador: ${tarifa_minima:,.2f} USD por noche."
+            )
+
+            # Si cambian fechas/categorías y el nuevo mínimo supera el valor
+            # manual que había quedado guardado, lo ajustamos automáticamente.
+            valor_manual_guardado = st.session_state.get('tarifa_manual_input')
+            if valor_manual_guardado is None or float(valor_manual_guardado) < tarifa_minima:
+                st.session_state['tarifa_manual_input'] = tarifa_minima
+
+            tarifa_manual = st.number_input(
+                "Nueva tarifa USD / noche (Con impuestos)",
+                min_value=tarifa_minima,
+                step=5.0,
+                format="%.2f",
+                key="tarifa_manual_input"
+            )
+
+            # Protección adicional: aunque el number_input ya tiene min_value,
+            # nunca aplicamos un importe inferior a la tarifa sugerida.
+            if float(tarifa_manual) < tarifa_minima:
+                st.error(
+                    f"La tarifa ingresada no puede ser menor a ${tarifa_minima:,.2f} USD por noche."
+                )
+            else:
+                # La tarifa capturada incluye impuestos. Recalculamos neto e
+                # impuestos sobre ESA tarifa para que el PDF muestre únicamente
+                # el precio final modificado y su desglose correspondiente.
+                p_noche_con_impuestos = float(tarifa_manual)
+                p_noche_neto = p_noche_con_impuestos / 1.30
+                impuesto_por_noche = p_noche_con_impuestos - p_noche_neto
+
+                if p_noche_con_impuestos > tarifa_minima:
+                    st.success(
+                        f"✅ Tarifa manual aplicada: ${p_noche_con_impuestos:,.2f} USD por noche."
+                    )
+
+            if st.button("↩️ Usar tarifa sugerida por cotizador", use_container_width=True):
+                st.session_state['modo_tarifa_manual'] = False
+                st.session_state.pop('tarifa_manual_input', None)
+                st.rerun()
+
+        # Los totales se calculan con la TARIFA FINAL. Si hubo modificación
+        # manual, estos importes y el PDF usan exclusivamente la tarifa modificada.
         total_usd_con_impuestos = p_noche_con_impuestos * noches
         total_mxn_con_impuestos = total_usd_con_impuestos * tc_actual
         c_reserva = n_reserva if n_reserva.strip() else "Sin_Numero"
 
+        st.divider()
+
         res1, res2, res3, res4 = st.columns(4)
         res1.metric("Noches", f"{noches}")
-        res2.metric("USD / Noche (Con Impuestos)", f"${p_noche_con_impuestos:,.2f}")
+        res2.metric("Tarifa Final USD / Noche (Con Impuestos)", f"${p_noche_con_impuestos:,.2f}")
         res3.metric("Total Estancia (USD)", f"${total_usd_con_impuestos:,.2f} USD")
         res4.metric("Total Estancia (MXN)", f"${total_mxn_con_impuestos:,.2f} MXN")
 
